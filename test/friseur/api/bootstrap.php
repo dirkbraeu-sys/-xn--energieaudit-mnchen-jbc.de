@@ -58,6 +58,8 @@ function friseur_ensure_schema(PDO $pdo): void
     friseur_ensure_column($pdo, 'profiles', 'verified', "verified TINYINT(1) NOT NULL DEFAULT 1");
     friseur_ensure_column($pdo, 'profiles', 'verification_token', "verification_token VARCHAR(64) NULL");
     friseur_ensure_column($pdo, 'profiles', 'verification_expires', "verification_expires DATETIME NULL");
+    friseur_ensure_column($pdo, 'profiles', 'reset_token', "reset_token VARCHAR(64) NULL");
+    friseur_ensure_column($pdo, 'profiles', 'reset_expires', "reset_expires DATETIME NULL");
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS bookings (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -70,12 +72,14 @@ function friseur_ensure_schema(PDO $pdo): void
             staff_id VARCHAR(30) NOT NULL,
             staff_name VARCHAR(190) NOT NULL,
             manual TINYINT(1) NOT NULL DEFAULT 0,
+            reminder_sent TINYINT(1) NOT NULL DEFAULT 0,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             KEY idx_date (date),
             KEY idx_customer (customer_id),
             KEY idx_staff (staff_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+    friseur_ensure_column($pdo, 'bookings', 'reminder_sent', "reminder_sent TINYINT(1) NOT NULL DEFAULT 0");
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS released_slots (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -84,6 +88,20 @@ function friseur_ensure_schema(PDO $pdo): void
             time TIME NOT NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_slot (staff_id, date, time)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS waitlist (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            customer_id INT UNSIGNED NOT NULL,
+            customer_name VARCHAR(190) NOT NULL,
+            email VARCHAR(190) NOT NULL,
+            date DATE NOT NULL,
+            staff_id VARCHAR(30) NOT NULL,
+            service VARCHAR(190) NOT NULL,
+            notified TINYINT(1) NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_date_staff (date, staff_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
 
@@ -140,6 +158,30 @@ function friseur_require_login(PDO $pdo): array
         friseur_json(['error' => 'Nicht angemeldet.'], 401);
     }
     return $p;
+}
+
+// Mindestanforderungen an Passwörter (gleiches Muster wie im Kundenlogin auf braeu-ing.de):
+// mind. 8 Zeichen, je mindestens ein Groß-, ein Kleinbuchstabe, eine Ziffer und ein Sonderzeichen.
+const FRISEUR_PASSWORT_HINWEIS = 'Das Passwort muss mindestens 8 Zeichen lang sein und einen Großbuchstaben, einen Kleinbuchstaben, eine Zahl und ein Sonderzeichen enthalten.';
+
+function friseur_valid_password(string $password): bool
+{
+    if (mb_strlen($password) < 8) {
+        return false;
+    }
+    if (!preg_match('/[A-ZÄÖÜ]/u', $password)) {
+        return false;
+    }
+    if (!preg_match('/[a-zäöüß]/u', $password)) {
+        return false;
+    }
+    if (!preg_match('/[0-9]/', $password)) {
+        return false;
+    }
+    if (!preg_match('/[^A-Za-z0-9ÄÖÜäöüß]/u', $password)) {
+        return false;
+    }
+    return true;
 }
 
 function friseur_mail_from_header(): string
@@ -201,4 +243,111 @@ function friseur_send_verification_mail(string $toEmail, string $name, string $t
         error_log('friseur_send_verification_mail: mail() lieferte false für ' . $toEmail);
     }
     return $ok;
+}
+
+function friseur_send_password_reset_mail(string $toEmail, string $name, string $token): bool
+{
+    $link = 'https://xn--energieaudit-mnchen-jbc.de/test/friseur/?reset=' . urlencode($token);
+    $safeName = $name !== '' ? $name : 'Kunde/Kundin';
+    $subject = 'Passwort zurücksetzen – Friseursalon München (Test)';
+    $body = "Hallo {$safeName},\n\n"
+        . "für Ihr Konto im Testbereich der Friseur-Terminbuchung wurde ein neues Passwort angefordert.\n"
+        . "Über folgenden Link können Sie ein neues Passwort vergeben (30 Minuten gültig):\n\n"
+        . $link . "\n\n"
+        . "Falls Sie das nicht angefordert haben, ignorieren Sie diese E-Mail einfach – Ihr Passwort bleibt unverändert.\n\n"
+        . "Friseursalon München\n"
+        . "Hinweis: Dies ist eine Testumgebung, nicht öffentlich online.\n";
+
+    $headers = "From: " . friseur_mail_from_header() . "\r\n"
+        . "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/plain; charset=UTF-8\r\n"
+        . "Content-Transfer-Encoding: 8bit\r\n";
+
+    $ok = mail($toEmail, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $headers);
+    if (!$ok) {
+        error_log('friseur_send_password_reset_mail: mail() lieferte false für ' . $toEmail);
+    }
+    return $ok;
+}
+
+function friseur_send_reminder_mail(string $toEmail, string $customerName, array $booking): bool
+{
+    $dateTimestamp = strtotime((string) $booking['date']);
+    $dateFormatted = $dateTimestamp !== false ? date('d.m.Y', $dateTimestamp) : (string) $booking['date'];
+    $timeFormatted = substr((string) $booking['start_time'], 0, 5) . '–' . substr((string) $booking['end_time'], 0, 5) . ' Uhr';
+    $safeName = $customerName !== '' ? $customerName : 'Kunde/Kundin';
+    $subject = 'Erinnerung: Ihr Termin morgen – Friseursalon München (Test)';
+    $body = "Hallo {$safeName},\n\n"
+        . "kurze Erinnerung an Ihren Termin morgen:\n\n"
+        . "Anwendung: {$booking['service']}\n"
+        . "Datum:     {$dateFormatted}\n"
+        . "Uhrzeit:   {$timeFormatted}\n"
+        . "Bei:       {$booking['staff_name']}\n\n"
+        . "Falls Sie den Termin nicht wahrnehmen können, stornieren Sie ihn bitte rechtzeitig unter \"Meine Termine\".\n\n"
+        . "Friseursalon München\n"
+        . "Hinweis: Dies ist eine Testumgebung, nicht öffentlich online.\n";
+
+    $headers = "From: " . friseur_mail_from_header() . "\r\n"
+        . "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/plain; charset=UTF-8\r\n"
+        . "Content-Transfer-Encoding: 8bit\r\n";
+
+    $ok = mail($toEmail, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $headers);
+    if (!$ok) {
+        error_log('friseur_send_reminder_mail: mail() lieferte false für ' . $toEmail);
+    }
+    return $ok;
+}
+
+function friseur_send_waitlist_mail(string $toEmail, string $customerName, array $slot): bool
+{
+    $dateTimestamp = strtotime((string) $slot['date']);
+    $dateFormatted = $dateTimestamp !== false ? date('d.m.Y', $dateTimestamp) : (string) $slot['date'];
+    $safeName = $customerName !== '' ? $customerName : 'Kunde/Kundin';
+    $subject = 'Ein Termin ist frei geworden – Friseursalon München (Test)';
+    $body = "Hallo {$safeName},\n\n"
+        . "gute Nachricht: Für den {$dateFormatted} bei {$slot['staff_name']} ist gerade ein Termin freigeworden,\n"
+        . "für den Sie sich auf die Warteliste eingetragen hatten.\n\n"
+        . "Bitte buchen Sie zeitnah online, da der Slot nicht reserviert ist und auch von anderen Kund:innen\n"
+        . "gebucht werden kann (wer zuerst bucht, bekommt den Termin).\n\n"
+        . "Friseursalon München\n"
+        . "Hinweis: Dies ist eine Testumgebung, nicht öffentlich online.\n";
+
+    $headers = "From: " . friseur_mail_from_header() . "\r\n"
+        . "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/plain; charset=UTF-8\r\n"
+        . "Content-Transfer-Encoding: 8bit\r\n";
+
+    $ok = mail($toEmail, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $headers);
+    if (!$ok) {
+        error_log('friseur_send_waitlist_mail: mail() lieferte false für ' . $toEmail);
+    }
+    return $ok;
+}
+
+function friseur_send_due_reminders(PDO $pdo): void
+{
+    // Pragmatische Umsetzung fuer die Testumgebung: kein eigener Cronjob noetig -
+    // bei jedem API-Aufruf werden faellige Erinnerungen (Termin ist "morgen") geprueft
+    // und verschickt. Bei sehr wenig Traffic kann sich der Versand dadurch etwas
+    // verzoegern, bis die naechste Anfrage eintrifft.
+    $tomorrow = (new DateTimeImmutable('+1 day'))->format('Y-m-d');
+    $stmt = $pdo->prepare(
+        "SELECT b.*, p.identifier AS customer_email FROM bookings b
+         JOIN profiles p ON p.id = b.customer_id
+         WHERE b.date = ? AND b.reminder_sent = 0 AND b.manual = 0
+         LIMIT 20"
+    );
+    $stmt->execute([$tomorrow]);
+    $due = $stmt->fetchAll();
+    if (!$due) {
+        return;
+    }
+    $markSent = $pdo->prepare('UPDATE bookings SET reminder_sent = 1 WHERE id = ?');
+    foreach ($due as $booking) {
+        if (filter_var($booking['customer_email'], FILTER_VALIDATE_EMAIL)) {
+            friseur_send_reminder_mail($booking['customer_email'], $booking['customer_name'], $booking);
+        }
+        $markSent->execute([$booking['id']]);
+    }
 }

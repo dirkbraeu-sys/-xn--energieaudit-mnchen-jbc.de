@@ -82,9 +82,6 @@ function toHHMM(mins) {
   const m = (mins % 60).toString().padStart(2, "0");
   return `${h}:${m}`;
 }
-function weekdayLabel(d) {
-  return d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
-}
 function nextAvailableDays(count) {
   const days = [];
   let d = new Date();
@@ -161,6 +158,55 @@ async function signInEmail(email, password) {
 async function signOutUser() {
   try { await api("signout", { method: "POST", body: {} }); } catch (e) {}
   currentProfile = null;
+}
+
+// Gleiche Mindestanforderungen wie im Kundenlogin auf braeu-ing.de: mind. 8 Zeichen,
+// je mind. ein Groß-, ein Kleinbuchstabe, eine Ziffer und ein Sonderzeichen.
+const PASSWORT_HINWEIS = "Das Passwort muss mindestens 8 Zeichen lang sein und einen Großbuchstaben, einen Kleinbuchstaben, eine Zahl und ein Sonderzeichen enthalten.";
+function isValidPassword(pw) {
+  return pw.length >= 8
+    && /[A-ZÄÖÜ]/.test(pw)
+    && /[a-zäöüß]/.test(pw)
+    && /[0-9]/.test(pw)
+    && /[^A-Za-z0-9ÄÖÜäöüß]/.test(pw);
+}
+function bindPasswordEyeToggles(scope = document) {
+  scope.querySelectorAll(".pw-eye").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = document.getElementById(btn.dataset.target);
+      if (!target) return;
+      target.type = target.type === "password" ? "text" : "password";
+      btn.textContent = target.type === "password" ? "👁️" : "🙈";
+    });
+  });
+}
+
+async function requestPasswordReset(email) {
+  try {
+    const data = await api("forgot_password", { method: "POST", body: { email } });
+    return { data, error: null };
+  } catch (e) {
+    return { data: null, error: { message: e.message } };
+  }
+}
+async function submitPasswordReset(token, password) {
+  try {
+    const data = await api("reset_password", { method: "POST", body: { token, password } });
+    return { data, error: null };
+  } catch (e) {
+    return { data: null, error: { message: e.message } };
+  }
+}
+async function resendVerification(email) {
+  try {
+    const data = await api("resend_verification", { method: "POST", body: { email } });
+    return { data, error: null };
+  } catch (e) {
+    return { data: null, error: { message: e.message } };
+  }
+}
+async function joinWaitlist({ date, staffId, service }) {
+  return api("waitlist_join", { method: "POST", body: { date, staff_id: staffId, service } });
 }
 
 /* ===========================================================
@@ -473,8 +519,11 @@ async function renderBooking() {
 
 // embedded=true: wird innerhalb eines anderen Schritts (z. B. Buchungs-Assistent) gezeigt,
 // ohne den einleitenden Infokasten doppelt anzuzeigen.
+// customerAuthMode: "login" | "signup" | "forgot"
 function authFormHTML(embedded) {
-  const isSignup = customerAuthMode === "signup";
+  const mode = customerAuthMode;
+  const isSignup = mode === "signup";
+  const isForgot = mode === "forgot";
   return `
     ${embedded ? "" : `
       <div class="alert alert-info">
@@ -482,30 +531,59 @@ function authFormHTML(embedded) {
         Neu hier? Einfach mit E-Mail-Adresse registrieren – in wenigen Sekunden erledigt.
       </div>
     `}
-    <div class="steps" style="margin-bottom:20px;">
-      <span class="step-pill ${!isSignup ? "active" : ""}" id="auth-tab-login" style="cursor:pointer;">Anmelden</span>
-      <span class="step-pill ${isSignup ? "active" : ""}" id="auth-tab-signup" style="cursor:pointer;">Registrieren</span>
-    </div>
-    <form id="auth-form">
-      <div id="auth-error"></div>
-      ${isSignup ? `
+    ${!isForgot ? `
+      <div class="steps" style="margin-bottom:20px;">
+        <span class="step-pill ${!isSignup ? "active" : ""}" id="auth-tab-login" style="cursor:pointer;">Anmelden</span>
+        <span class="step-pill ${isSignup ? "active" : ""}" id="auth-tab-signup" style="cursor:pointer;">Registrieren</span>
+      </div>
+    ` : `<h4 style="margin-top:0;">Passwort vergessen</h4>`}
+    <div id="auth-error"></div>
+    ${isForgot ? `
+      <form id="forgot-form">
         <div class="form-row">
-          <label for="auth-name">Ihr Name</label>
-          <input id="auth-name" type="text" autocomplete="name" placeholder="Vor- und Nachname" required>
+          <label for="forgot-email">E-Mail-Adresse</label>
+          <input id="forgot-email" type="email" autocomplete="email" placeholder="ihre@email.de" required>
         </div>
-      ` : ""}
-      <div class="form-row">
-        <label for="auth-email">${isSignup ? "E-Mail-Adresse" : "E-Mail-Adresse oder Benutzername"}</label>
-        <input id="auth-email" type="${isSignup ? "email" : "text"}" autocomplete="${isSignup ? "email" : "username"}" placeholder="${isSignup ? "ihre@email.de" : "ihre@email.de oder Benutzername"}" required>
-      </div>
-      <div class="form-row">
-        <label for="auth-pass">Passwort</label>
-        <input id="auth-pass" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" placeholder="mind. 6 Zeichen" required minlength="6">
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary">${isSignup ? "Registrieren" : "Anmelden"}</button>
-      </div>
-    </form>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Link zum Zurücksetzen senden</button>
+          <button type="button" class="btn btn-light" id="auth-back-to-login">Zurück zur Anmeldung</button>
+        </div>
+      </form>
+    ` : `
+      <form id="auth-form">
+        ${isSignup ? `
+          <div class="form-row">
+            <label for="auth-name">Ihr Name</label>
+            <input id="auth-name" type="text" autocomplete="name" placeholder="Vor- und Nachname" required>
+          </div>
+        ` : ""}
+        <div class="form-row">
+          <label for="auth-email">${isSignup ? "E-Mail-Adresse" : "E-Mail-Adresse oder Benutzername"}</label>
+          <input id="auth-email" type="${isSignup ? "email" : "text"}" autocomplete="${isSignup ? "email" : "username"}" placeholder="${isSignup ? "ihre@email.de" : "ihre@email.de oder Benutzername"}" required>
+        </div>
+        <div class="form-row">
+          <label for="auth-pass">Passwort</label>
+          <div class="pw-field">
+            <input id="auth-pass" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" placeholder="${isSignup ? "mind. 8 Zeichen" : "Passwort"}" required minlength="${isSignup ? 8 : 1}">
+            <button type="button" class="pw-eye" data-target="auth-pass" aria-label="Passwort anzeigen">👁️</button>
+          </div>
+        </div>
+        ${isSignup ? `
+          <div class="form-row">
+            <label for="auth-pass2">Passwort wiederholen</label>
+            <div class="pw-field">
+              <input id="auth-pass2" type="password" autocomplete="new-password" placeholder="Passwort wiederholen" required minlength="8">
+              <button type="button" class="pw-eye" data-target="auth-pass2" aria-label="Passwort anzeigen">👁️</button>
+            </div>
+          </div>
+          <p class="hint">${PASSWORT_HINWEIS}</p>
+        ` : ""}
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">${isSignup ? "Registrieren" : "Anmelden"}</button>
+        </div>
+        ${!isSignup ? `<p class="hint" style="text-align:right; margin-top:10px;"><button type="button" class="link-danger" id="auth-forgot-link" style="color:var(--gold-dark);">Passwort vergessen?</button></p>` : ""}
+      </form>
+    `}
   `;
 }
 
@@ -513,22 +591,65 @@ function authFormHTML(embedded) {
 // Login/Registrieren aufgerufen – zeigt je nach Kontext die Buchungsübersicht,
 // "Meine Termine" oder (mitten im Assistenten) direkt den Bestätigen-Schritt.
 function bindAuthForm(rerender) {
-  document.getElementById("auth-tab-login").addEventListener("click", () => {
+  document.getElementById("auth-tab-login")?.addEventListener("click", () => {
     customerAuthMode = "login";
     rerender();
   });
-  document.getElementById("auth-tab-signup").addEventListener("click", () => {
+  document.getElementById("auth-tab-signup")?.addEventListener("click", () => {
     customerAuthMode = "signup";
     rerender();
   });
+  document.getElementById("auth-forgot-link")?.addEventListener("click", () => {
+    customerAuthMode = "forgot";
+    rerender();
+  });
+  document.getElementById("auth-back-to-login")?.addEventListener("click", () => {
+    customerAuthMode = "login";
+    rerender();
+  });
 
-  document.getElementById("auth-form").addEventListener("submit", async (e) => {
+  bindPasswordEyeToggles(document);
+
+  document.getElementById("forgot-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("forgot-email").value.trim();
+    const errBox = document.getElementById("auth-error");
+    const btn = e.target.querySelector("button[type=submit]");
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ Wird gesendet …";
+    const { data, error } = await requestPasswordReset(email);
+    btn.disabled = false;
+    btn.textContent = origText;
+    if (error) {
+      errBox.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
+      return;
+    }
+    errBox.innerHTML = `<div class="alert alert-ok">✅ ${data.message}</div>`;
+  });
+
+  document.getElementById("auth-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = document.getElementById("auth-email").value.trim();
     const pass = document.getElementById("auth-pass").value;
     const errBox = document.getElementById("auth-error");
     const submitBtn = e.target.querySelector("button[type=submit]");
+    const origText = submitBtn.textContent;
+
+    if (customerAuthMode === "signup") {
+      const pass2 = document.getElementById("auth-pass2").value;
+      if (pass !== pass2) {
+        errBox.innerHTML = `<div class="alert alert-error">Die Passwörter stimmen nicht überein.</div>`;
+        return;
+      }
+      if (!isValidPassword(pass)) {
+        errBox.innerHTML = `<div class="alert alert-error">${PASSWORT_HINWEIS}</div>`;
+        return;
+      }
+    }
+
     submitBtn.disabled = true;
+    submitBtn.textContent = "⏳ Bitte warten …";
 
     try {
       if (customerAuthMode === "signup") {
@@ -540,6 +661,7 @@ function bindAuthForm(rerender) {
           errBox.innerHTML = `<div class="alert alert-ok">✅ Fast fertig! Bitte bestätigen Sie die E-Mail, die wir an ${email} geschickt haben, und melden Sie sich danach an. Ihre Terminauswahl bleibt dabei erhalten.</div>`;
           customerAuthMode = "login";
           submitBtn.disabled = false;
+          submitBtn.textContent = origText;
           return;
         }
       } else {
@@ -550,8 +672,17 @@ function bindAuthForm(rerender) {
       renderNavUser();
       rerender();
     } catch (err) {
-      errBox.innerHTML = `<div class="alert alert-error">${err.message || "Anmeldung fehlgeschlagen."}</div>`;
+      const needsVerify = /bestätigen/i.test(err.message || "");
+      errBox.innerHTML = `<div class="alert alert-error">${err.message || "Anmeldung fehlgeschlagen."}</div>${needsVerify ? `<div style="margin-top:8px;"><button type="button" class="link-danger" id="auth-resend-link" style="color:var(--gold-dark);">Bestätigungsmail erneut senden</button></div>` : ""}`;
       submitBtn.disabled = false;
+      submitBtn.textContent = origText;
+      document.getElementById("auth-resend-link")?.addEventListener("click", async (ev) => {
+        const linkBtn = ev.target;
+        linkBtn.disabled = true;
+        linkBtn.textContent = "⏳ Wird gesendet …";
+        const { data } = await resendVerification(email);
+        errBox.innerHTML = `<div class="alert alert-ok">✅ ${data?.message || "Falls ein Konto existiert, wurde eine neue Bestätigungsmail gesendet."}</div>`;
+      });
     }
   });
 }
@@ -648,14 +779,18 @@ async function renderCustomerBookingTab(profile) {
 
     ${service ? `
       <div class="form-row">
-        <label for="date-pick">Datum wählen</label>
-        <select id="date-pick">
-          <option value="">– bitte wählen –</option>
-          ${nextAvailableDays(14).map(d => `
-            <option value="${fmtDate(d)}" ${bookingState.date === fmtDate(d) ? "selected" : ""}>
-              ${weekdayLabel(d)}
-            </option>`).join("")}
-        </select>
+        <label>Datum wählen</label>
+        <div class="date-strip" id="date-strip">
+          ${nextAvailableDays(14).map(d => {
+            const val = fmtDate(d);
+            return `
+            <button type="button" class="date-chip ${bookingState.date === val ? "selected" : ""}" data-date="${val}">
+              <span class="date-chip-weekday">${d.toLocaleDateString("de-DE", { weekday: "short" })}</span>
+              <span class="date-chip-day">${d.getDate()}</span>
+              <span class="date-chip-month">${d.toLocaleDateString("de-DE", { month: "short" })}</span>
+            </button>`;
+          }).join("")}
+        </div>
       </div>
     ` : ""}
 
@@ -674,10 +809,12 @@ async function renderCustomerBookingTab(profile) {
     });
   });
 
-  document.getElementById("date-pick")?.addEventListener("change", (e) => {
-    bookingState.date = e.target.value || null;
-    bookingState.start = null; bookingState.staffId = null;
-    renderCustomerBookingTab(profile);
+  content.querySelectorAll(".date-chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      bookingState.date = btn.dataset.date;
+      bookingState.start = null; bookingState.staffId = null;
+      renderCustomerBookingTab(profile);
+    });
   });
 
   content.querySelectorAll(".slot-btn").forEach(btn => {
@@ -686,6 +823,22 @@ async function renderCustomerBookingTab(profile) {
       bookingState.staffId = null;
       renderCustomerBookingTab(profile);
     });
+  });
+
+  document.getElementById("waitlist-btn")?.addEventListener("click", async (e) => {
+    const btn = e.target;
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ Bitte warten …";
+    const msgBox = document.getElementById("waitlist-msg");
+    try {
+      const { message } = await joinWaitlist({ date: bookingState.date, staffId: "egal", service: service.name });
+      msgBox.innerHTML = `<div class="alert alert-ok">✅ ${message}</div>`;
+    } catch (err) {
+      msgBox.innerHTML = `<div class="alert alert-error">${err.message || "Warteliste fehlgeschlagen."}</div>`;
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   });
 
   document.querySelectorAll('#staff-pick input[name="staff"]').forEach(input => {
@@ -697,7 +850,10 @@ async function renderCustomerBookingTab(profile) {
 
   if (profile) {
     document.getElementById("confirm-btn")?.addEventListener("click", async (e) => {
-      e.target.disabled = true;
+      const btn = e.target;
+      const origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "⏳ Wird gebucht …";
       const svc = SERVICES.find(s => s.id === bookingState.serviceId);
       const assignedStaffId = await resolveStaffForSlot(bookingState.date, bookingState.start, svc.duration, bookingState.staffId);
       const endMin = toMinutes(bookingState.start) + svc.duration;
@@ -715,7 +871,8 @@ async function renderCustomerBookingTab(profile) {
         });
       } catch (err) {
         document.getElementById("booking-confirm").innerHTML = `<div class="alert alert-error">Buchung fehlgeschlagen: ${err.message || err}</div>`;
-        e.target.disabled = false;
+        btn.disabled = false;
+        btn.textContent = origText;
         return;
       }
 
@@ -750,7 +907,15 @@ async function renderTermineSlotsHTML(service) {
   }
   const slots = await computeFreeSlots(bookingState.date, service.duration, "egal");
   if (slots.length === 0) {
-    return `<div class="alert alert-error">An diesem Tag ist für „${service.name}" (${service.duration} Min) leider kein freigegebenes Zeitfenster mehr verfügbar. Bitte anderes Datum wählen.</div>`;
+    return `
+      <div class="alert alert-error">An diesem Tag ist für „${service.name}" (${service.duration} Min) leider kein freigegebenes Zeitfenster mehr verfügbar. Bitte anderes Datum wählen.</div>
+      ${currentProfile ? `
+        <div class="form-actions" style="margin-top:-8px;">
+          <button type="button" class="btn btn-light" id="waitlist-btn">🔔 Auf Warteliste eintragen</button>
+        </div>
+        <div id="waitlist-msg"></div>
+      ` : `<p class="hint">Melden Sie sich an, um sich für diesen Tag auf die Warteliste setzen zu lassen – wird ein Termin frei, benachrichtigen wir Sie per E-Mail.</p>`}
+    `;
   }
   return `
     <div class="form-row">
@@ -1424,12 +1589,90 @@ async function handleEmailVerification() {
 }
 
 /* ===========================================================
+   Passwort zurücksetzen (Link aus der "Passwort vergessen"-Mail)
+   =========================================================== */
+function handlePasswordResetLink() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("reset");
+  if (!token) return;
+
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed; inset:0; z-index:9999; background:rgba(42,36,32,.55); display:flex; align-items:center; justify-content:center; padding:20px;";
+  overlay.innerHTML = `
+    <div style="background:#fff; border-radius:14px; padding:28px; max-width:420px; width:100%; font-family:sans-serif; box-shadow:0 20px 50px rgba(0,0,0,.3);">
+      <h3 style="margin-top:0; font-family:Georgia, serif;">Neues Passwort setzen</h3>
+      <div id="reset-error"></div>
+      <form id="reset-form">
+        <div class="form-row">
+          <label for="reset-pass">Neues Passwort</label>
+          <div class="pw-field">
+            <input id="reset-pass" type="password" minlength="8" placeholder="mind. 8 Zeichen" required>
+            <button type="button" class="pw-eye" data-target="reset-pass" aria-label="Passwort anzeigen">👁️</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="reset-pass2">Passwort wiederholen</label>
+          <div class="pw-field">
+            <input id="reset-pass2" type="password" minlength="8" placeholder="Passwort wiederholen" required>
+            <button type="button" class="pw-eye" data-target="reset-pass2" aria-label="Passwort anzeigen">👁️</button>
+          </div>
+        </div>
+        <p class="hint">${PASSWORT_HINWEIS}</p>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Passwort speichern</button>
+          <button type="button" class="btn btn-light" id="reset-cancel">Abbrechen</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  bindPasswordEyeToggles(overlay);
+
+  overlay.querySelector("#reset-cancel").addEventListener("click", () => overlay.remove());
+  overlay.querySelector("#reset-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pw = overlay.querySelector("#reset-pass").value;
+    const pw2 = overlay.querySelector("#reset-pass2").value;
+    const errBox = overlay.querySelector("#reset-error");
+    const btn = e.target.querySelector("button[type=submit]");
+    if (pw !== pw2) {
+      errBox.innerHTML = `<div class="alert alert-error">Die Passwörter stimmen nicht überein.</div>`;
+      return;
+    }
+    if (!isValidPassword(pw)) {
+      errBox.innerHTML = `<div class="alert alert-error">${PASSWORT_HINWEIS}</div>`;
+      return;
+    }
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ Wird gespeichert …";
+    const { error } = await submitPasswordReset(token, pw);
+    if (error) {
+      errBox.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
+      btn.disabled = false;
+      btn.textContent = origText;
+      return;
+    }
+    overlay.querySelector("div").innerHTML = `
+      <p>✅ Passwort erfolgreich geändert. Sie können sich jetzt damit anmelden.</p>
+      <div class="form-actions"><button type="button" class="btn btn-primary" id="reset-close">Schließen</button></div>
+    `;
+    overlay.querySelector("#reset-close").addEventListener("click", () => overlay.remove());
+  });
+
+  params.delete("reset");
+  const query = params.toString();
+  window.history.replaceState({}, "", window.location.pathname + (query ? "?" + query : "") + window.location.hash);
+}
+
+/* ===========================================================
    Init
    =========================================================== */
 document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("hashchange", handleRoute);
 
   await handleEmailVerification();
+  handlePasswordResetLink();
   restoreBookingDraftIfAny();
   await loadCurrentProfile();
   handleRoute();

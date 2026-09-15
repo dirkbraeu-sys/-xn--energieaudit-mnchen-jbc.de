@@ -4,6 +4,7 @@ require __DIR__ . '/bootstrap.php';
 
 $pdo = friseur_db();
 friseur_ensure_schema($pdo);
+friseur_send_due_reminders($pdo);
 
 $action = (string) ($_GET['action'] ?? '');
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -19,8 +20,11 @@ switch ($action) {
         $password = (string) ($in['password'] ?? '');
         $displayName = trim((string) ($in['display_name'] ?? $identifier));
         $displayName = $displayName !== '' ? $displayName : $identifier;
-        if (!filter_var($identifier, FILTER_VALIDATE_EMAIL) || mb_strlen($password) < 6) {
-            friseur_json(['error' => 'Bitte eine gültige E-Mail-Adresse und ein Passwort mit mind. 6 Zeichen angeben.'], 400);
+        if (!filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
+            friseur_json(['error' => 'Bitte eine gültige E-Mail-Adresse angeben.'], 400);
+        }
+        if (!friseur_valid_password($password)) {
+            friseur_json(['error' => FRISEUR_PASSWORT_HINWEIS], 400);
         }
         $token = bin2hex(random_bytes(32));
         $expires = (new DateTimeImmutable('+60 minutes'))->format('Y-m-d H:i:s');
@@ -80,6 +84,69 @@ switch ($action) {
         }
         $pdo->prepare('UPDATE profiles SET verified = 1, verification_token = NULL, verification_expires = NULL WHERE id = ?')->execute([$row['id']]);
         friseur_json(['ok' => true, 'name' => $row['display_name']]);
+
+    case 'resend_verification':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $in = friseur_body();
+        $identifier = trim((string) ($in['email'] ?? $in['identifier'] ?? ''));
+        $genericOk = ['ok' => true, 'message' => 'Falls für diese Adresse eine unbestätigte Registrierung besteht, wurde eine neue Bestätigungsmail verschickt.'];
+        if ($identifier === '') {
+            friseur_json($genericOk);
+        }
+        $stmt = $pdo->prepare('SELECT id, display_name, verified FROM profiles WHERE identifier = ?');
+        $stmt->execute([$identifier]);
+        $row = $stmt->fetch();
+        if ($row && (int) $row['verified'] !== 1) {
+            $token = bin2hex(random_bytes(32));
+            $expires = (new DateTimeImmutable('+60 minutes'))->format('Y-m-d H:i:s');
+            $pdo->prepare('UPDATE profiles SET verification_token = ?, verification_expires = ? WHERE id = ?')->execute([$token, $expires, $row['id']]);
+            friseur_send_verification_mail($identifier, $row['display_name'], $token);
+        }
+        // Immer dieselbe Antwort, unabhängig davon ob/welcher Account existiert (kein Preisgeben von Konten).
+        friseur_json($genericOk);
+
+    case 'forgot_password':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $in = friseur_body();
+        $identifier = trim((string) ($in['email'] ?? $in['identifier'] ?? ''));
+        $genericOk = ['ok' => true, 'message' => 'Falls ein Konto mit dieser Adresse besteht, wurde eine E-Mail zum Zurücksetzen des Passworts verschickt.'];
+        if ($identifier === '') {
+            friseur_json($genericOk);
+        }
+        $stmt = $pdo->prepare('SELECT id, display_name FROM profiles WHERE identifier = ?');
+        $stmt->execute([$identifier]);
+        $row = $stmt->fetch();
+        if ($row) {
+            $token = bin2hex(random_bytes(32));
+            $expires = (new DateTimeImmutable('+30 minutes'))->format('Y-m-d H:i:s');
+            $pdo->prepare('UPDATE profiles SET reset_token = ?, reset_expires = ? WHERE id = ?')->execute([$token, $expires, $row['id']]);
+            friseur_send_password_reset_mail($identifier, $row['display_name'], $token);
+        }
+        friseur_json($genericOk);
+
+    case 'reset_password':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $in = friseur_body();
+        $token = trim((string) ($in['token'] ?? ''));
+        $password = (string) ($in['password'] ?? '');
+        if ($token === '' || !preg_match('/^[a-f0-9]{64}$/', $token)) {
+            friseur_json(['error' => 'Ungültiger Link zum Zurücksetzen.'], 400);
+        }
+        if (!friseur_valid_password($password)) {
+            friseur_json(['error' => FRISEUR_PASSWORT_HINWEIS], 400);
+        }
+        $stmt = $pdo->prepare('SELECT id, reset_expires FROM profiles WHERE reset_token = ?');
+        $stmt->execute([$token]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            friseur_json(['error' => 'Der Link ist ungültig oder wurde bereits verwendet.'], 400);
+        }
+        if (!$row['reset_expires'] || new DateTimeImmutable((string) $row['reset_expires']) < new DateTimeImmutable()) {
+            friseur_json(['error' => 'Der Link ist abgelaufen. Bitte fordern Sie einen neuen an.'], 400);
+        }
+        $pdo->prepare('UPDATE profiles SET password_hash = ?, reset_token = NULL, reset_expires = NULL WHERE id = ?')
+            ->execute([password_hash($password, PASSWORD_DEFAULT), $row['id']]);
+        friseur_json(['ok' => true]);
 
     case 'signout':
         $_SESSION = [];
@@ -253,7 +320,56 @@ switch ($action) {
             || ((int) $row['customer_id'] === (int) $me['id']);
         if (!$allowed) friseur_json(['error' => 'Kein Zugriff.'], 403);
         $pdo->prepare('DELETE FROM bookings WHERE id = ?')->execute([$id]);
+
+        // Wartelisten-Eintrag benachrichtigen, falls vorhanden (ältester zuerst, nur einmal).
+        // "egal" = für diesen Tag wurde kein bestimmter Mitarbeiter gewünscht.
+        $wl = $pdo->prepare("SELECT * FROM waitlist WHERE date = ? AND (staff_id = ? OR staff_id = 'egal') AND notified = 0 ORDER BY created_at ASC LIMIT 1");
+        $wl->execute([$row['date'], $row['staff_id']]);
+        $waiting = $wl->fetch();
+        if ($waiting && filter_var($waiting['email'], FILTER_VALIDATE_EMAIL)) {
+            friseur_send_waitlist_mail($waiting['email'], $waiting['customer_name'], [
+                'date' => $row['date'],
+                'staff_name' => $row['staff_name'],
+            ]);
+            $pdo->prepare('UPDATE waitlist SET notified = 1 WHERE id = ?')->execute([$waiting['id']]);
+        }
+
         friseur_json(['ok' => true]);
+
+    // ---------- Warteliste ----------
+
+    case 'waitlist_join':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $me = friseur_require_login($pdo);
+        $in = friseur_body();
+        $date = (string) ($in['date'] ?? '');
+        $staffId = (string) ($in['staff_id'] ?? '');
+        $service = (string) ($in['service'] ?? '');
+        if ($date === '' || $staffId === '' || $service === '') {
+            friseur_json(['error' => 'Bitte Datum, Mitarbeiter:in und Anwendung angeben.'], 400);
+        }
+        $check = $pdo->prepare('SELECT id FROM waitlist WHERE customer_id = ? AND date = ? AND staff_id = ? AND notified = 0');
+        $check->execute([$me['id'], $date, $staffId]);
+        if ($check->fetch()) {
+            friseur_json(['ok' => true, 'message' => 'Sie stehen für diesen Tag bereits auf der Warteliste.']);
+        }
+        $pdo->prepare('INSERT INTO waitlist (customer_id, customer_name, email, date, staff_id, service) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([$me['id'], $me['display_name'], $me['identifier'], $date, $staffId, $service]);
+        friseur_json(['ok' => true, 'message' => 'Sie wurden auf die Warteliste gesetzt. Wird ein Termin frei, erhalten Sie eine E-Mail.']);
+
+    case 'waitlist_list':
+        $me = friseur_require_login($pdo);
+        if (!in_array($me['role'], ['staff', 'owner'], true)) friseur_json(['error' => 'Kein Zugriff.'], 403);
+        $where = ['notified = 0'];
+        $params = [];
+        if ($me['role'] === 'staff') {
+            $where[] = 'staff_id = ?';
+            $params[] = $me['staff_id'];
+        }
+        $sql = 'SELECT * FROM waitlist WHERE ' . implode(' AND ', $where) . ' ORDER BY date, created_at';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        friseur_json(['waitlist' => $stmt->fetchAll()]);
 
     // ---------- Released slots ----------
 
