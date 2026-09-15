@@ -1,0 +1,126 @@
+<?php
+declare(strict_types=1);
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_name('friseur_test');
+    session_start();
+}
+
+$dbConfigFile = __DIR__ . '/db-config.php';
+if (!file_exists($dbConfigFile)) {
+    http_response_code(503);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['error' => 'Testbereich nicht konfiguriert (db-config.php fehlt).']);
+    exit;
+}
+require_once $dbConfigFile;
+
+function friseur_ensure_schema(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS profiles (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            identifier VARCHAR(100) NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            role ENUM('customer','staff','owner') NOT NULL DEFAULT 'customer',
+            staff_id VARCHAR(30) NULL,
+            display_name VARCHAR(190) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_identifier (identifier)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS bookings (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            customer_id INT UNSIGNED NULL,
+            customer_name VARCHAR(190) NOT NULL,
+            service VARCHAR(190) NOT NULL,
+            date DATE NOT NULL,
+            start_time TIME NOT NULL,
+            end_time TIME NOT NULL,
+            staff_id VARCHAR(30) NOT NULL,
+            staff_name VARCHAR(190) NOT NULL,
+            manual TINYINT(1) NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_date (date),
+            KEY idx_customer (customer_id),
+            KEY idx_staff (staff_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS released_slots (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            staff_id VARCHAR(30) NOT NULL,
+            date DATE NOT NULL,
+            time TIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_slot (staff_id, date, time)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    // Demo-Zugänge einmalig anlegen (entspricht den Angaben aus der README).
+    $seed = [
+        ['stammkunde', 'demo2026', 'customer', null, 'Stammkunde (Demo)'],
+        ['team', 'graf2026', 'owner', null, 'Andreas Graf (Inhaber)'],
+        ['andreas', 'andreas2026', 'staff', 'andreas', 'Andreas'],
+        ['yvonne', 'yvonne2026', 'staff', 'yvonne', 'Yvonne'],
+        ['caro', 'caro2026', 'staff', 'caro', 'Caro'],
+    ];
+    $check = $pdo->prepare('SELECT id FROM profiles WHERE identifier = ?');
+    $ins = $pdo->prepare('INSERT INTO profiles (identifier, password_hash, role, staff_id, display_name) VALUES (?, ?, ?, ?, ?)');
+    foreach ($seed as [$identifier, $password, $role, $staffId, $displayName]) {
+        $check->execute([$identifier]);
+        if (!$check->fetch()) {
+            $ins->execute([$identifier, password_hash($password, PASSWORD_DEFAULT), $role, $staffId, $displayName]);
+        }
+    }
+
+    $done = true;
+}
+
+function friseur_json($data, int $status = 200): never
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function friseur_body(): array
+{
+    $raw = file_get_contents('php://input');
+    $data = json_decode((string) $raw, true);
+    return is_array($data) ? $data : [];
+}
+
+function friseur_current_profile(PDO $pdo): ?array
+{
+    if (empty($_SESSION['profile_id'])) {
+        return null;
+    }
+    $stmt = $pdo->prepare('SELECT id, identifier, role, staff_id, display_name FROM profiles WHERE id = ?');
+    $stmt->execute([$_SESSION['profile_id']]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function friseur_require_login(PDO $pdo): array
+{
+    $p = friseur_current_profile($pdo);
+    if (!$p) {
+        friseur_json(['error' => 'Nicht angemeldet.'], 401);
+    }
+    return $p;
+}

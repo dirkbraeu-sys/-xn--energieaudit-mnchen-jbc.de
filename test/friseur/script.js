@@ -1,15 +1,36 @@
 /* ===========================================================
    Friseursalon – Terminbuchung & Interaktion
-   Datenhaltung: Supabase (echter, geräteübergreifender Kalender).
-   Login/Registrierung läuft über Supabase Auth (E-Mail + Passwort).
+   Datenhaltung: eigenes PHP/MySQL-Backend (api/index.php) bei netcup –
+   echter, geräteübergreifender Kalender, Login per E-Mail/Name + Passwort.
    =========================================================== */
 
-/* ---------- Supabase-Verbindung ---------- */
-// Project URL & anon/publishable Key sind bewusst öffentlich (Supabase-Design) –
-// der Schutz kommt über die Row-Level-Security-Regeln in der Datenbank.
-const SUPABASE_URL = "https://oyqbkgyrbdtajtipkkhb.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_rp6-pU34ilIOXOYG4-fZjA_zwbIUi3O";
-const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* ---------- API-Verbindung ---------- */
+const API_BASE = "api/index.php";
+async function api(action, { method = "GET", body } = {}) {
+  const url = `${API_BASE}?action=${encodeURIComponent(action)}`;
+  const res = await fetch(url, {
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    credentials: "same-origin"
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json.error || "Es ist ein Fehler aufgetreten.");
+    err.status = res.status;
+    throw err;
+  }
+  return json;
+}
+function apiGet(action, params = {}) {
+  const qs = new URLSearchParams(params).toString();
+  return fetch(`${API_BASE}?action=${encodeURIComponent(action)}${qs ? "&" + qs : ""}`, { credentials: "same-origin" })
+    .then(async r => {
+      const json = await r.json().catch(() => ({}));
+      if (!r.ok) { const err = new Error(json.error || "Fehler"); err.status = r.status; throw err; }
+      return json;
+    });
+}
 
 /* ---------- Konfiguration ---------- */
 
@@ -100,31 +121,45 @@ function manualTimeOptionsHTML(selected) {
 let currentProfile = null; // { id, email, role: 'customer'|'staff'|'owner', staffId, name } oder null
 
 async function loadCurrentProfile() {
-  const { data: { session } } = await sbClient.auth.getSession();
-  if (!session) { currentProfile = null; return null; }
-  const { data, error } = await sbClient.from("profiles").select("*").eq("id", session.user.id).single();
-  if (error || !data) { currentProfile = null; return null; }
-  currentProfile = {
-    id: session.user.id,
-    email: session.user.email,
-    role: data.role,
-    staffId: data.staff_id,
-    name: data.display_name
-  };
-  return currentProfile;
+  try {
+    const { profile } = await apiGet("me");
+    if (!profile) { currentProfile = null; return null; }
+    currentProfile = {
+      id: profile.id,
+      email: profile.identifier,
+      role: profile.role,
+      staffId: profile.staff_id,
+      name: profile.display_name
+    };
+    return currentProfile;
+  } catch (e) {
+    currentProfile = null;
+    return null;
+  }
 }
 
 async function signUpCustomer(email, password, displayName) {
-  return await sbClient.auth.signUp({
-    email, password,
-    options: { data: { display_name: displayName } }
-  });
+  try {
+    const { profile } = await api("signup", { method: "POST", body: { email, password, display_name: displayName } });
+    currentProfile = profile ? { id: profile.id, email: profile.identifier, role: profile.role, staffId: profile.staff_id, name: profile.display_name } : null;
+    // Unser Backend verlangt keine E-Mail-Bestätigung, session=true übersprint
+    // daher den entsprechenden Hinweis-Zweig im Aufrufer.
+    return { data: { profile: currentProfile, session: true }, error: null };
+  } catch (e) {
+    return { data: null, error: { message: e.message } };
+  }
 }
 async function signInEmail(email, password) {
-  return await sbClient.auth.signInWithPassword({ email, password });
+  try {
+    const { profile } = await api("signin", { method: "POST", body: { email, password } });
+    currentProfile = profile ? { id: profile.id, email: profile.identifier, role: profile.role, staffId: profile.staff_id, name: profile.display_name } : null;
+    return { data: { profile: currentProfile }, error: null };
+  } catch (e) {
+    return { data: null, error: { message: e.message } };
+  }
 }
 async function signOutUser() {
-  await sbClient.auth.signOut();
+  try { await api("signout", { method: "POST", body: {} }); } catch (e) {}
   currentProfile = null;
 }
 
@@ -146,48 +181,52 @@ function mapBooking(row) {
   };
 }
 
-// Für Kund:innen: nur Zeiten/Mitarbeiter:in (keine Namen) über die busy_slots-Sicht
+// Für Kund:innen: nur Zeiten/Mitarbeiter:in (keine Namen)
 async function dbFetchBusySlots(dateStr, staffId) {
-  const { data, error } = await sbClient.from("busy_slots").select("start_time,end_time")
-    .eq("date", dateStr).eq("staff_id", staffId);
-  if (error) { console.error(error); return []; }
-  return data.map(r => ({ start: r.start_time.slice(0, 5), end: r.end_time.slice(0, 5) }));
+  try {
+    const { rows } = await apiGet("busy_slots", { date: dateStr, staff_id: staffId });
+    return rows.map(r => ({ start: r.start_time.slice(0, 5), end: r.end_time.slice(0, 5) }));
+  } catch (e) { console.error(e); return []; }
 }
 
-// Für Team/Inhaber: volle Buchungsdaten (durch RLS auf den eigenen Bereich begrenzt)
+// Für Team/Inhaber: volle Buchungsdaten (Zugriff wird serverseitig begrenzt)
 async function dbFetchBookingsAdmin({ date, staffId, fromDate } = {}) {
-  let q = sbClient.from("bookings").select("*");
-  if (date) q = q.eq("date", date);
-  if (fromDate) q = q.gte("date", fromDate);
-  if (staffId && staffId !== "alle") q = q.eq("staff_id", staffId);
-  q = q.order("date", { ascending: true }).order("start_time", { ascending: true });
-  const { data, error } = await q;
-  if (error) { console.error(error); return []; }
-  return data.map(mapBooking);
+  try {
+    const params = {};
+    if (date) params.date = date;
+    if (fromDate) params.from = fromDate;
+    if (staffId && staffId !== "alle") params.staff_id = staffId;
+    const { bookings } = await apiGet("bookings_list", params);
+    return bookings.map(mapBooking);
+  } catch (e) { console.error(e); return []; }
 }
 
 async function dbFetchBookingsForCustomer(customerId) {
-  const { data, error } = await sbClient.from("bookings").select("*")
-    .eq("customer_id", customerId).order("date").order("start_time");
-  if (error) { console.error(error); return []; }
-  return data.map(mapBooking);
+  try {
+    // customerId ist gesetzt, wenn ein:e Inhaber:in gezielt die Buchungen
+    // einer bestimmten Kundschaft abruft; ohne Parameter liefert das Backend
+    // ohnehin nur die eigenen Buchungen der eingeloggten Person zurück.
+    const params = customerId ? { customer_id: customerId } : {};
+    const { bookings } = await apiGet("bookings_list", params);
+    return bookings.map(mapBooking);
+  } catch (e) { console.error(e); return []; }
 }
 
 async function dbInsertBooking({ date, start, end, service, user, staffId, staff, manual, customerId }) {
-  const { data, error } = await sbClient.from("bookings").insert({
-    customer_id: customerId || null,
-    customer_name: user,
-    service, date,
-    start_time: start, end_time: end,
-    staff_id: staffId, staff_name: staff,
-    manual: !!manual
-  }).select().single();
-  if (error) throw error;
-  return mapBooking(data);
+  const { id } = await api("booking_create", {
+    method: "POST",
+    body: {
+      customer_name: user, service, date,
+      start_time: start, end_time: end,
+      staff_id: staffId, staff_name: staff,
+      manual: !!manual
+    }
+  });
+  return mapBooking({ id, customer_id: customerId || null, customer_name: user, service, date, start_time: start, end_time: end, staff_id: staffId, staff_name: staff, manual: !!manual });
 }
 
 async function dbUpdateBooking(id, patch) {
-  const dbPatch = {};
+  const dbPatch = { id };
   if (patch.date) dbPatch.date = patch.date;
   if (patch.start) dbPatch.start_time = patch.start;
   if (patch.end) dbPatch.end_time = patch.end;
@@ -195,40 +234,32 @@ async function dbUpdateBooking(id, patch) {
   if (patch.user) dbPatch.customer_name = patch.user;
   if (patch.staffId) dbPatch.staff_id = patch.staffId;
   if (patch.staff) dbPatch.staff_name = patch.staff;
-  const { error } = await sbClient.from("bookings").update(dbPatch).eq("id", id);
-  if (error) throw error;
+  await api("booking_update", { method: "POST", body: dbPatch });
 }
 
 async function dbDeleteBooking(id) {
-  const { error } = await sbClient.from("bookings").delete().eq("id", id);
-  if (error) throw error;
+  await api("booking_delete", { method: "POST", body: { id } });
 }
 
 async function dbFetchReleasedSlots(dateStr, staffId) {
-  const { data, error } = await sbClient.from("released_slots").select("time")
-    .eq("date", dateStr).eq("staff_id", staffId);
-  if (error) { console.error(error); return []; }
-  return data.map(r => r.time.slice(0, 5));
+  try {
+    const { times } = await apiGet("released_slots_list", { date: dateStr, staff_id: staffId });
+    return times.map(t => t.slice(0, 5));
+  } catch (e) { console.error(e); return []; }
 }
 
 async function toggleReleasedSlot(dateStr, staffId, time) {
-  const { data } = await sbClient.from("released_slots").select("id")
-    .eq("date", dateStr).eq("staff_id", staffId).eq("time", time).maybeSingle();
-  if (data) {
-    await sbClient.from("released_slots").delete().eq("id", data.id);
-  } else {
-    await sbClient.from("released_slots").insert({ staff_id: staffId, date: dateStr, time });
-  }
+  await api("released_slot_toggle", { method: "POST", body: { staff_id: staffId, date: dateStr, time } });
 }
 
 async function setAllReleased(dateStr, staffId, released) {
   if (!released) {
-    await sbClient.from("released_slots").delete().eq("date", dateStr).eq("staff_id", staffId);
+    await api("released_slots_clear_day", { method: "POST", body: { staff_id: staffId, date: dateStr } });
     return;
   }
   const rows = allSlotsForDate(dateStr).map(t => ({ staff_id: staffId, date: dateStr, time: t }));
   if (rows.length === 0) return;
-  await sbClient.from("released_slots").upsert(rows, { onConflict: "staff_id,date,time", ignoreDuplicates: true });
+  await api("released_slots_bulk", { method: "POST", body: { rows } });
 }
 
 async function hasAnyReleaseForDate(dateStr) {
@@ -237,12 +268,11 @@ async function hasAnyReleaseForDate(dateStr) {
 }
 
 async function dbFetchCustomerProfiles() {
-  const { data, error } = await sbClient.from("profiles").select("*")
-    .eq("role", "customer").order("display_name");
-  if (error) { console.error(error); return []; }
-  return data;
+  try {
+    const { profiles } = await api("profiles_list", {});
+    return profiles;
+  } catch (e) { console.error(e); return []; }
 }
-
 /* ---------- Freie Zeitfenster berechnen (Kundenseite) ---------- */
 async function computeFreeSlotsForStaff(dateStr, duration, staffId) {
   const d = new Date(dateStr + "T00:00:00");
@@ -971,8 +1001,10 @@ async function renderAdminBookings(lockedStaffId) {
 
   let editingBooking = editingBookingId ? [...dayBookings, ...upcoming].find(b => b.id === editingBookingId) : null;
   if (!editingBooking && editingBookingId) {
-    const { data } = await sbClient.from("bookings").select("*").eq("id", editingBookingId).maybeSingle();
-    if (data) editingBooking = mapBooking(data);
+    try {
+      const { booking } = await apiGet("booking_get", { id: editingBookingId });
+      if (booking) editingBooking = mapBooking(booking);
+    } catch (e) { /* nicht gefunden oder kein Zugriff */ }
   }
   if (editingBooking && lockedStaffId && editingBooking.staffId !== lockedStaffId) editingBooking = null;
 
