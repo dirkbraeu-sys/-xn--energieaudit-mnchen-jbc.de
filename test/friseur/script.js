@@ -800,22 +800,18 @@ async function renderCustomerBookingTab(profile) {
   }
 
   const service = SERVICES.find(s => s.id === bookingState.serviceId);
-  const timeChosen = !!(service && bookingState.date && bookingState.start);
+  const serviceChosen = !!service;
   const staffChosen = !!bookingState.staffId;
-  const step = !timeChosen ? 1 : (!staffChosen ? 2 : 3);
+  const timeChosen = !!(service && bookingState.date && bookingState.start);
+  const step = !serviceChosen ? 1 : (!staffChosen ? 2 : (!timeChosen ? 3 : 4));
 
   let slotsHTML = "";
-  if (service && bookingState.date) {
-    slotsHTML = await renderTermineSlotsHTML(service);
-  }
-
-  let staffHTML = "";
-  if (timeChosen) {
-    staffHTML = await renderStaffPickHTML(service);
+  if (staffChosen && bookingState.date) {
+    slotsHTML = await renderTermineSlotsHTML(service, bookingState.staffId);
   }
 
   let finalHTML = "";
-  if (timeChosen && staffChosen) {
+  if (timeChosen) {
     finalHTML = profile
       ? confirmSummaryHTML(service)
       : `<div class="alert alert-info">Fast geschafft – zum Abschluss bitte anmelden oder registrieren:</div>${authFormHTML(true)}`;
@@ -823,9 +819,10 @@ async function renderCustomerBookingTab(profile) {
 
   content.innerHTML = `
     <div class="steps">
-      <span class="step-pill ${step >= 1 ? (step > 1 ? "done" : "active") : ""}">1 · Termin wählen</span>
+      <span class="step-pill ${step >= 1 ? (step > 1 ? "done" : "active") : ""}">1 · Anwendung wählen</span>
       <span class="step-pill ${step === 2 ? "active" : step > 2 ? "done" : ""}">2 · Mitarbeiter:in wählen</span>
-      <span class="step-pill ${step === 3 ? "active" : ""}">3 · Anmelden &amp; Bestätigen</span>
+      <span class="step-pill ${step === 3 ? "active" : step > 3 ? "done" : ""}">3 · Termin wählen</span>
+      <span class="step-pill ${step === 4 ? "active" : ""}">4 · Anmelden &amp; Bestätigen</span>
     </div>
 
     <div class="form-row">
@@ -840,7 +837,9 @@ async function renderCustomerBookingTab(profile) {
       </div>
     </div>
 
-    ${service ? `
+    ${serviceChosen ? renderStaffChoiceHTML() : ""}
+
+    ${staffChosen ? `
       <div class="form-row">
         <label>Datum wählen</label>
         <div class="date-strip" id="date-strip">
@@ -858,7 +857,6 @@ async function renderCustomerBookingTab(profile) {
     ` : ""}
 
     ${slotsHTML}
-    ${staffHTML}
     ${finalHTML}
 
     <div id="booking-confirm"></div>
@@ -873,10 +871,19 @@ async function renderCustomerBookingTab(profile) {
     });
   });
 
+  document.querySelectorAll('#staff-pick input[name="staff"]').forEach(input => {
+    input.addEventListener("change", (e) => {
+      bookingState.staffId = e.target.value;
+      bookingState.date = null; bookingState.start = null;
+      saveBookingDraft();
+      renderCustomerBookingTab(profile);
+    });
+  });
+
   content.querySelectorAll(".date-chip").forEach(btn => {
     btn.addEventListener("click", () => {
       bookingState.date = btn.dataset.date;
-      bookingState.start = null; bookingState.staffId = null;
+      bookingState.start = null;
       saveBookingDraft();
       renderCustomerBookingTab(profile);
     });
@@ -885,7 +892,6 @@ async function renderCustomerBookingTab(profile) {
   content.querySelectorAll(".slot-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       bookingState.start = btn.dataset.slot;
-      bookingState.staffId = null;
       saveBookingDraft();
       renderCustomerBookingTab(profile);
     });
@@ -898,21 +904,13 @@ async function renderCustomerBookingTab(profile) {
     btn.textContent = "⏳ Bitte warten …";
     const msgBox = document.getElementById("waitlist-msg");
     try {
-      const { message } = await joinWaitlist({ date: bookingState.date, staffId: "egal", service: service.name });
+      const { message } = await joinWaitlist({ date: bookingState.date, staffId: bookingState.staffId, service: service.name });
       msgBox.innerHTML = `<div class="alert alert-ok">✅ ${message}</div>`;
     } catch (err) {
       msgBox.innerHTML = `<div class="alert alert-error">${err.message || "Warteliste fehlgeschlagen."}</div>`;
       btn.disabled = false;
       btn.textContent = origText;
     }
-  });
-
-  document.querySelectorAll('#staff-pick input[name="staff"]').forEach(input => {
-    input.addEventListener("change", (e) => {
-      bookingState.staffId = e.target.value;
-      saveBookingDraft();
-      renderCustomerBookingTab(profile);
-    });
   });
 
   if (profile) {
@@ -965,17 +963,41 @@ async function renderCustomerBookingTab(profile) {
   }
 }
 
-// Schritt 1: freie Zeitfenster über ALLE Mitarbeiter:innen hinweg (Vereinigung) –
-// wer konkret Zeit hat, wird erst in Schritt 2 anhand der gewählten Uhrzeit ermittelt.
-async function renderTermineSlotsHTML(service) {
+// Schritt 2: Mitarbeiter:in wählen – vor der Terminauswahl, weil die freien
+// Zeitfenster von der gewählten Person abhängen. "Alle" berücksichtigt bei der
+// Slot-Berechnung die Vereinigung aller Mitarbeiter:innen (wer zuerst frei ist).
+function renderStaffChoiceHTML() {
+  return `
+    <div class="form-row">
+      <label>Bei wem möchten Sie den Termin?</label>
+      <div class="service-pick" id="staff-pick">
+        ${STAFF.map(s => `
+          <label>
+            <input type="radio" name="staff" value="${s.id}" ${bookingState.staffId === s.id ? "checked" : ""}>
+            <span>${s.name}</span>
+          </label>
+        `).join("")}
+        <label>
+          <input type="radio" name="staff" value="egal" ${bookingState.staffId === "egal" ? "checked" : ""}>
+          <span>Alle<br><small>Wer zuerst frei ist</small></span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+// Schritt 3: freie Zeitfenster für die in Schritt 2 gewählte Person (oder,
+// bei "Alle", die Vereinigung über alle Mitarbeiter:innen hinweg).
+async function renderTermineSlotsHTML(service, staffId) {
   const releaseExists = await hasAnyReleaseForDate(bookingState.date);
   if (!releaseExists) {
     return `<div class="alert alert-error">Für diesen Tag hat noch niemand Termine freigegeben. Bitte anderes Datum wählen.</div>`;
   }
-  const slots = await computeFreeSlots(bookingState.date, service.duration, "egal");
+  const slots = await computeFreeSlots(bookingState.date, service.duration, staffId);
   if (slots.length === 0) {
+    const wen = staffId === "egal" ? "" : ` bei ${staffNameById(staffId)}`;
     return `
-      <div class="alert alert-error">An diesem Tag ist für „${service.name}" (${service.duration} Min) leider kein freigegebenes Zeitfenster mehr verfügbar. Bitte anderes Datum wählen.</div>
+      <div class="alert alert-error">An diesem Tag ist für „${service.name}" (${service.duration} Min)${wen} leider kein freigegebenes Zeitfenster mehr verfügbar. Bitte anderes Datum oder eine andere Person wählen.</div>
       ${currentProfile ? `
         <div class="form-actions" style="margin-top:-8px;">
           <button type="button" class="btn btn-light" id="waitlist-btn">🔔 Auf Warteliste eintragen</button>
@@ -991,45 +1013,6 @@ async function renderTermineSlotsHTML(service) {
         ${slots.map(s => `
           <button type="button" class="slot-btn ${bookingState.start === s ? "selected" : ""}" data-slot="${s}">${s}</button>
         `).join("")}
-      </div>
-    </div>
-  `;
-}
-
-// Schritt 2: welche Mitarbeiter:innen sind zur gewählten Uhrzeit tatsächlich frei?
-async function freeStaffAt(dateStr, start, duration) {
-  const checks = await Promise.all(STAFF.map(async (s) => {
-    const [busy, released] = await Promise.all([dbFetchBusySlots(dateStr, s.id), dbFetchReleasedSlots(dateStr, s.id)]);
-    if (!released.includes(start)) return null;
-    const startMin = toMinutes(start), endMin = startMin + duration;
-    const overlaps = busy.some(b => startMin < toMinutes(b.end) && endMin > toMinutes(b.start));
-    return overlaps ? null : s.id;
-  }));
-  return checks.filter(Boolean);
-}
-
-async function renderStaffPickHTML(service) {
-  const freeIds = await freeStaffAt(bookingState.date, bookingState.start, service.duration);
-  if (freeIds.length === 0) {
-    return `<div class="alert alert-error">Diese Zeit ist inzwischen nicht mehr frei. Bitte eine andere Uhrzeit wählen.</div>`;
-  }
-  const freeStaff = STAFF.filter(s => freeIds.includes(s.id));
-  return `
-    <div class="form-row">
-      <label>Bei wem möchten Sie den Termin um ${bookingState.start} Uhr?</label>
-      <div class="service-pick" id="staff-pick">
-        ${freeStaff.map(s => `
-          <label>
-            <input type="radio" name="staff" value="${s.id}" ${bookingState.staffId === s.id ? "checked" : ""}>
-            <span>${s.name}</span>
-          </label>
-        `).join("")}
-        ${freeStaff.length > 1 ? `
-          <label>
-            <input type="radio" name="staff" value="egal" ${bookingState.staffId === "egal" ? "checked" : ""}>
-            <span>Egal<br><small>Hauptsache frei</small></span>
-          </label>
-        ` : ""}
       </div>
     </div>
   `;
@@ -1103,11 +1086,16 @@ function renderNavUser() {
   if (currentProfile) {
     el.innerHTML = `
       <span class="user-chip">👤 ${currentProfile.name} <button id="nav-logout">abmelden</button></span>
+      <a href="#termin" class="btn btn-light" id="nav-meine-termine-btn">Meine Termine</a>
       <a href="#termin" class="btn btn-primary">Termin buchen</a>
     `;
     document.getElementById("nav-logout").addEventListener("click", async () => {
       await signOutUser();
       renderNavUser();
+      renderBooking();
+    });
+    document.getElementById("nav-meine-termine-btn").addEventListener("click", () => {
+      customerView = "meine";
       renderBooking();
     });
   } else {
