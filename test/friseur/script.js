@@ -170,6 +170,40 @@ function isValidPassword(pw) {
     && /[0-9]/.test(pw)
     && /[^A-Za-z0-9ÄÖÜäöüß]/.test(pw);
 }
+const PASSWORT_KRITERIEN = [
+  { key: "length", label: "mindestens 8 Zeichen", test: pw => pw.length >= 8 },
+  { key: "upper", label: "ein Großbuchstabe (A–Z)", test: pw => /[A-ZÄÖÜ]/.test(pw) },
+  { key: "lower", label: "ein Kleinbuchstabe (a–z)", test: pw => /[a-zäöüß]/.test(pw) },
+  { key: "digit", label: "eine Zahl (0–9)", test: pw => /[0-9]/.test(pw) },
+  { key: "special", label: "ein Sonderzeichen (z. B. ! ? % &)", test: pw => /[^A-Za-z0-9ÄÖÜäöüß]/.test(pw) },
+];
+function passwordChecklistHTML(id) {
+  return `
+    <ul class="pw-checklist" id="${id}">
+      ${PASSWORT_KRITERIEN.map(k => `<li data-key="${k.key}">${k.label}</li>`).join("")}
+    </ul>
+  `;
+}
+// Zeigt live an (bei jedem Tastendruck), welche Passwort-Kriterien schon erfüllt sind,
+// statt nur einen statischen Hinweistext – Nutzer:in muss nicht erst absenden, um zu
+// erfahren, was noch fehlt.
+function bindPasswordChecklist(inputId, checklistId) {
+  const input = document.getElementById(inputId);
+  const list = document.getElementById(checklistId);
+  if (!input || !list) return;
+  const update = () => {
+    const pw = input.value;
+    PASSWORT_KRITERIEN.forEach(k => {
+      const li = list.querySelector(`[data-key="${k.key}"]`);
+      if (!li) return;
+      const ok = k.test(pw);
+      li.classList.toggle("ok", ok);
+      li.classList.toggle("bad", !ok);
+    });
+  };
+  input.addEventListener("input", update);
+  update();
+}
 function bindPasswordEyeToggles(scope = document) {
   scope.querySelectorAll(".pw-eye").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -580,7 +614,7 @@ function authFormHTML(embedded) {
               <button type="button" class="pw-eye" data-target="auth-pass2" aria-label="Passwort anzeigen">👁️</button>
             </div>
           </div>
-          <p class="hint">${PASSWORT_HINWEIS}</p>
+          ${passwordChecklistHTML("auth-pass-checklist")}
         ` : ""}
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">${isSignup ? "Registrieren" : "Anmelden"}</button>
@@ -613,6 +647,7 @@ function bindAuthForm(rerender) {
   });
 
   bindPasswordEyeToggles(document);
+  bindPasswordChecklist("auth-pass", "auth-pass-checklist");
 
   document.getElementById("forgot-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1124,7 +1159,48 @@ async function renderAdmin() {
   }
 }
 
+let salonAuthMode = "login"; // "login" | "forgot"
+
 function renderSalonLogin(root) {
+  if (salonAuthMode === "forgot") {
+    root.innerHTML = `
+      <div class="alert alert-info">Passwort vergessen? Wir schicken Ihnen einen Link zum Zurücksetzen.</div>
+      <div id="salon-login-error"></div>
+      <form id="salon-forgot-form">
+        <div class="form-row">
+          <label for="salon-forgot-email">E-Mail-Adresse</label>
+          <input id="salon-forgot-email" type="email" autocomplete="email" placeholder="ihre@email.de" required>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Link zum Zurücksetzen senden</button>
+          <button type="button" class="btn btn-light" id="salon-back-to-login">Zurück zur Anmeldung</button>
+        </div>
+      </form>
+    `;
+    document.getElementById("salon-back-to-login").addEventListener("click", () => {
+      salonAuthMode = "login";
+      renderAdmin();
+    });
+    document.getElementById("salon-forgot-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("salon-forgot-email").value.trim();
+      const errBox = document.getElementById("salon-login-error");
+      const btn = e.target.querySelector("button[type=submit]");
+      const origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "⏳ Wird gesendet …";
+      const { data, error } = await requestPasswordReset(email);
+      btn.disabled = false;
+      btn.textContent = origText;
+      if (error) {
+        errBox.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
+        return;
+      }
+      errBox.innerHTML = `<div class="alert alert-ok">✅ ${data?.message || "Falls ein Konto mit dieser E-Mail existiert, wurde eine E-Mail zum Zurücksetzen gesendet."}</div>`;
+    });
+    return;
+  }
+
   root.innerHTML = `
     <div class="alert alert-info">
       Dieser Bereich ist nur fürs Salon-Team gedacht.
@@ -1146,9 +1222,14 @@ function renderSalonLogin(root) {
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">Anmelden</button>
       </div>
+      <p class="hint" style="text-align:right; margin-top:10px;"><button type="button" class="link-danger" id="salon-forgot-link" style="color:var(--gold-dark);">Passwort vergessen?</button></p>
     </form>
   `;
   bindPasswordEyeToggles(root);
+  document.getElementById("salon-forgot-link").addEventListener("click", () => {
+    salonAuthMode = "forgot";
+    renderAdmin();
+  });
   document.getElementById("salon-login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = document.getElementById("salon-email").value.trim();
@@ -1661,7 +1742,7 @@ function handlePasswordResetLink() {
             <button type="button" class="pw-eye" data-target="reset-pass2" aria-label="Passwort anzeigen">👁️</button>
           </div>
         </div>
-        <p class="hint">${PASSWORT_HINWEIS}</p>
+        ${passwordChecklistHTML("reset-pass-checklist")}
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Passwort speichern</button>
           <button type="button" class="btn btn-light" id="reset-cancel">Abbrechen</button>
@@ -1671,6 +1752,7 @@ function handlePasswordResetLink() {
   `;
   document.body.appendChild(overlay);
   bindPasswordEyeToggles(overlay);
+  bindPasswordChecklist("reset-pass", "reset-pass-checklist");
 
   overlay.querySelector("#reset-cancel").addEventListener("click", () => overlay.remove());
   overlay.querySelector("#reset-form").addEventListener("submit", async (e) => {

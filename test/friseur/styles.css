@@ -308,6 +308,13 @@ section{padding:78px 0;}
 }
 .pw-eye:hover{background:var(--paper-alt);}
 
+.pw-checklist{list-style:none; padding:0; margin:8px 0 0; font-size:.82rem; display:grid; gap:4px;}
+.pw-checklist li{position:relative; padding-left:1.4em; color:var(--ink-soft);}
+.pw-checklist li::before{content:"○"; position:absolute; left:0; color:var(--ink-soft);}
+.pw-checklist li.ok{color:#2e7d32;}
+.pw-checklist li.ok::before{content:"✓"; color:#2e7d32; font-weight:700;}
+.pw-checklist li.bad::before{content:"✕"; color:#b3261e;}
+
 .date-strip{display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch;}
 .date-chip{
   flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:2px;
