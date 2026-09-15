@@ -477,6 +477,10 @@ function closeMobileNav() {
 const bookingState = { serviceId: null, date: null, start: null, staffId: null };
 let customerView = "buchen"; // "buchen" | "meine"
 let customerAuthMode = "login"; // "login" | "signup"
+// Wird über den "Anmelden"-Button im Header gesetzt: zeigt sofort das Login-
+// Formular, statt erst wieder durch die Terminauswahl zu führen, damit
+// wiederkehrende Kund:innen mit gespeicherter Terminauswahl direkt anmelden können.
+let forceLoginPrompt = false;
 
 function resetBookingState() {
   bookingState.serviceId = null; bookingState.date = null; bookingState.start = null; bookingState.staffId = null;
@@ -706,12 +710,14 @@ async function bindBookingShell(profile) {
   document.getElementById("logout-btn")?.addEventListener("click", async () => {
     await signOutUser();
     resetBookingState();
+    clearBookingDraft();
     customerView = "buchen";
+    forceLoginPrompt = false;
     renderBooking();
     renderNavUser();
   });
 
-  document.getElementById("ctab-buchen").addEventListener("click", () => { customerView = "buchen"; renderBooking(); });
+  document.getElementById("ctab-buchen").addEventListener("click", () => { customerView = "buchen"; forceLoginPrompt = false; renderBooking(); });
   document.getElementById("ctab-meine").addEventListener("click", () => { customerView = "meine"; renderBooking(); });
 
   if (customerView === "meine") {
@@ -736,6 +742,28 @@ async function bindBookingShell(profile) {
 // erst prüfen, ob überhaupt etwas Passendes frei ist, bevor sie sich registrieren.
 async function renderCustomerBookingTab(profile) {
   const content = document.getElementById("customer-tab-content");
+
+  if (!profile && forceLoginPrompt) {
+    const hasDraft = !!(bookingState.serviceId || bookingState.date || bookingState.staffId);
+    content.innerHTML = `
+      <div class="alert alert-info">
+        ${hasDraft
+          ? "Willkommen zurück! Bitte melden Sie sich an, um Ihre gespeicherte Terminauswahl fortzusetzen."
+          : "Bitte melden Sie sich an oder registrieren Sie sich."}
+      </div>
+      ${authFormHTML(true)}
+      <p class="hint" style="text-align:center; margin-top:10px;">
+        <button type="button" class="link-danger" id="skip-login-btn" style="color:var(--gold-dark);">Stattdessen einen neuen Termin auswählen</button>
+      </p>
+    `;
+    bindAuthForm(() => { forceLoginPrompt = false; renderBooking(); });
+    document.getElementById("skip-login-btn").addEventListener("click", () => {
+      forceLoginPrompt = false;
+      renderCustomerBookingTab(profile);
+    });
+    return;
+  }
+
   const service = SERVICES.find(s => s.id === bookingState.serviceId);
   const timeChosen = !!(service && bookingState.date && bookingState.start);
   const staffChosen = !!bookingState.staffId;
@@ -805,6 +833,7 @@ async function renderCustomerBookingTab(profile) {
     input.addEventListener("change", (e) => {
       bookingState.serviceId = e.target.value;
       bookingState.date = null; bookingState.start = null; bookingState.staffId = null;
+      saveBookingDraft();
       renderCustomerBookingTab(profile);
     });
   });
@@ -813,6 +842,7 @@ async function renderCustomerBookingTab(profile) {
     btn.addEventListener("click", () => {
       bookingState.date = btn.dataset.date;
       bookingState.start = null; bookingState.staffId = null;
+      saveBookingDraft();
       renderCustomerBookingTab(profile);
     });
   });
@@ -821,6 +851,7 @@ async function renderCustomerBookingTab(profile) {
     btn.addEventListener("click", () => {
       bookingState.start = btn.dataset.slot;
       bookingState.staffId = null;
+      saveBookingDraft();
       renderCustomerBookingTab(profile);
     });
   });
@@ -844,6 +875,7 @@ async function renderCustomerBookingTab(profile) {
   document.querySelectorAll('#staff-pick input[name="staff"]').forEach(input => {
     input.addEventListener("change", (e) => {
       bookingState.staffId = e.target.value;
+      saveBookingDraft();
       renderCustomerBookingTab(profile);
     });
   });
@@ -1044,7 +1076,15 @@ function renderNavUser() {
       renderBooking();
     });
   } else {
-    el.innerHTML = `<a href="#termin" class="btn btn-primary">Termin buchen</a>`;
+    el.innerHTML = `
+      <a href="#termin" class="btn btn-light" id="nav-login-btn">Anmelden</a>
+      <a href="#termin" class="btn btn-primary">Termin buchen</a>
+    `;
+    document.getElementById("nav-login-btn").addEventListener("click", () => {
+      forceLoginPrompt = true;
+      customerView = "buchen";
+      renderBooking();
+    });
   }
 }
 
