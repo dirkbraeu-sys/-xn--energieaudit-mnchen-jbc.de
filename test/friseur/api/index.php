@@ -176,6 +176,15 @@ switch ($action) {
         if ($service === '' || $date === '' || $startTime === '' || $endTime === '' || $staffId === '') {
             friseur_json(['error' => 'Bitte Anwendung, Datum, Uhrzeit und Mitarbeiter:in angeben.'], 400);
         }
+        // Kollisionsprüfung: zwischen Auswahl und finaler Bestätigung (z. B. während der
+        // E-Mail-Bestätigung bei der Registrierung) kann der Slot inzwischen belegt worden sein.
+        $conflictStmt = $pdo->prepare(
+            'SELECT id FROM bookings WHERE staff_id = ? AND date = ? AND start_time < ? AND end_time > ? LIMIT 1'
+        );
+        $conflictStmt->execute([$staffId, $date, $endTime, $startTime]);
+        if ($conflictStmt->fetch()) {
+            friseur_json(['error' => 'Dieser Termin wurde inzwischen leider von jemand anderem gebucht. Bitte wählen Sie eine andere Zeit.'], 409);
+        }
         $stmt = $pdo->prepare('INSERT INTO bookings (customer_id, customer_name, service, date, start_time, end_time, staff_id, staff_name, manual) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $customerId,
