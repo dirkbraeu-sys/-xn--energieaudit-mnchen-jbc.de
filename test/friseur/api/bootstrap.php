@@ -149,7 +149,8 @@ function friseur_mail_from_header(): string
 
 function friseur_send_booking_confirmation_mail(string $toEmail, string $customerName, array $booking): bool
 {
-    $dateFormatted = date('d.m.Y', strtotime((string) $booking['date']));
+    $dateTimestamp = strtotime((string) $booking['date']);
+    $dateFormatted = $dateTimestamp !== false ? date('d.m.Y', $dateTimestamp) : (string) $booking['date'];
     $timeFormatted = substr((string) $booking['start_time'], 0, 5) . '–' . substr((string) $booking['end_time'], 0, 5) . ' Uhr';
     $safeName = $customerName !== '' ? $customerName : 'Kunde/Kundin';
     $subject = 'Ihre Terminbestätigung – Friseursalon München (Test)';

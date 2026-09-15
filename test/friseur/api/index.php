@@ -173,6 +173,9 @@ switch ($action) {
         $endTime = (string) ($in['end_time'] ?? '');
         $staffId = (string) ($in['staff_id'] ?? '');
         $staffName = (string) ($in['staff_name'] ?? '');
+        if ($service === '' || $date === '' || $startTime === '' || $endTime === '' || $staffId === '') {
+            friseur_json(['error' => 'Bitte Anwendung, Datum, Uhrzeit und Mitarbeiter:in angeben.'], 400);
+        }
         $stmt = $pdo->prepare('INSERT INTO bookings (customer_id, customer_name, service, date, start_time, end_time, staff_id, staff_name, manual) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $customerId,
