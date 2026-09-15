@@ -1098,13 +1098,17 @@ function renderSalonLogin(root) {
       </div>
       <div class="form-row">
         <label for="salon-pass">Passwort</label>
-        <input id="salon-pass" type="password" autocomplete="current-password" required>
+        <div class="pw-field">
+          <input id="salon-pass" type="password" autocomplete="current-password" required>
+          <button type="button" class="pw-eye" data-target="salon-pass" aria-label="Passwort anzeigen">👁️</button>
+        </div>
       </div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">Anmelden</button>
       </div>
     </form>
   `;
+  bindPasswordEyeToggles(root);
   document.getElementById("salon-login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = document.getElementById("salon-email").value.trim();
