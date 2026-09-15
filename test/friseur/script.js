@@ -436,6 +436,34 @@ function resetBookingState() {
   bookingState.serviceId = null; bookingState.date = null; bookingState.start = null; bookingState.staffId = null;
 }
 
+// Merkt sich die aktuelle Terminauswahl über den Registrierungs-/Bestätigungs-Umweg
+// hinweg (E-Mail-Link öffnet meist einen neuen Tab, in dem der Auswahl-Zustand sonst
+// verloren wäre), damit man nach dem Anmelden direkt weiterbuchen kann.
+const BOOKING_DRAFT_KEY = "friseur_booking_draft";
+function saveBookingDraft() {
+  try {
+    localStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify({ ...bookingState, savedAt: Date.now() }));
+  } catch (e) { /* localStorage evtl. nicht verfügbar */ }
+}
+function restoreBookingDraftIfAny() {
+  try {
+    const raw = localStorage.getItem(BOOKING_DRAFT_KEY);
+    if (!raw) return;
+    const draft = JSON.parse(raw);
+    if (!draft.savedAt || Date.now() - draft.savedAt > 24 * 60 * 60 * 1000) {
+      localStorage.removeItem(BOOKING_DRAFT_KEY);
+      return;
+    }
+    if (draft.serviceId) bookingState.serviceId = draft.serviceId;
+    if (draft.date) bookingState.date = draft.date;
+    if (draft.start) bookingState.start = draft.start;
+    if (draft.staffId) bookingState.staffId = draft.staffId;
+  } catch (e) { /* ignorieren */ }
+}
+function clearBookingDraft() {
+  try { localStorage.removeItem(BOOKING_DRAFT_KEY); } catch (e) { /* ignorieren */ }
+}
+
 async function renderBooking() {
   const root = document.getElementById("booking-app");
   if (!root) return;
@@ -508,7 +536,8 @@ function bindAuthForm(rerender) {
         const { data, error } = await signUpCustomer(email, pass, name);
         if (error) throw error;
         if (!data.session) {
-          errBox.innerHTML = `<div class="alert alert-ok">✅ Fast fertig! Bitte bestätigen Sie die E-Mail, die wir an ${email} geschickt haben, und melden Sie sich danach an.</div>`;
+          saveBookingDraft();
+          errBox.innerHTML = `<div class="alert alert-ok">✅ Fast fertig! Bitte bestätigen Sie die E-Mail, die wir an ${email} geschickt haben, und melden Sie sich danach an. Ihre Terminauswahl bleibt dabei erhalten.</div>`;
           customerAuthMode = "login";
           submitBtn.disabled = false;
           return;
@@ -705,6 +734,7 @@ async function renderCustomerBookingTab(profile) {
       document.getElementById(`ics-btn-${booking.id}`).addEventListener("click", () => downloadICS(booking));
 
       resetBookingState();
+      clearBookingDraft();
     });
   } else if (document.getElementById("auth-form")) {
     bindAuthForm(() => renderCustomerBookingTab(currentProfile));
@@ -1400,6 +1430,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("hashchange", handleRoute);
 
   await handleEmailVerification();
+  restoreBookingDraftIfAny();
   await loadCurrentProfile();
   handleRoute();
   renderNavUser();
