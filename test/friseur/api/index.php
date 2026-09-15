@@ -18,34 +18,68 @@ switch ($action) {
         $identifier = trim((string) ($in['email'] ?? $in['identifier'] ?? ''));
         $password = (string) ($in['password'] ?? '');
         $displayName = trim((string) ($in['display_name'] ?? $identifier));
-        if ($identifier === '' || mb_strlen($password) < 6) {
-            friseur_json(['error' => 'Bitte E-Mail/Namen und ein Passwort mit mind. 6 Zeichen angeben.'], 400);
+        $displayName = $displayName !== '' ? $displayName : $identifier;
+        if (!filter_var($identifier, FILTER_VALIDATE_EMAIL) || mb_strlen($password) < 6) {
+            friseur_json(['error' => 'Bitte eine gültige E-Mail-Adresse und ein Passwort mit mind. 6 Zeichen angeben.'], 400);
         }
-        $check = $pdo->prepare('SELECT id FROM profiles WHERE identifier = ?');
+        $token = bin2hex(random_bytes(32));
+        $expires = (new DateTimeImmutable('+60 minutes'))->format('Y-m-d H:i:s');
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+
+        $check = $pdo->prepare('SELECT id, verified FROM profiles WHERE identifier = ?');
         $check->execute([$identifier]);
-        if ($check->fetch()) {
-            friseur_json(['error' => 'Für diese Adresse besteht bereits ein Konto.'], 400);
+        $existing = $check->fetch();
+        if ($existing) {
+            if ((int) $existing['verified'] === 1) {
+                friseur_json(['error' => 'Für diese Adresse besteht bereits ein Konto. Bitte melden Sie sich an.'], 400);
+            }
+            // Registrierung noch nicht bestätigt: neuen Token vergeben und erneut zusenden.
+            $upd = $pdo->prepare('UPDATE profiles SET password_hash = ?, display_name = ?, verification_token = ?, verification_expires = ? WHERE id = ?');
+            $upd->execute([$passwordHash, $displayName, $token, $expires, $existing['id']]);
+        } else {
+            $ins = $pdo->prepare('INSERT INTO profiles (identifier, password_hash, role, display_name, verified, verification_token, verification_expires) VALUES (?, ?, "customer", ?, 0, ?, ?)');
+            $ins->execute([$identifier, $passwordHash, $displayName, $token, $expires]);
         }
-        $ins = $pdo->prepare('INSERT INTO profiles (identifier, password_hash, role, display_name) VALUES (?, ?, "customer", ?)');
-        $ins->execute([$identifier, password_hash($password, PASSWORD_DEFAULT), $displayName !== '' ? $displayName : $identifier]);
-        $_SESSION['profile_id'] = (int) $pdo->lastInsertId();
-        friseur_json(['profile' => friseur_current_profile($pdo)]);
+
+        friseur_send_verification_mail($identifier, $displayName, $token);
+        friseur_json(['profile' => null, 'message' => 'Bitte bestätigen Sie Ihre E-Mail-Adresse über den zugesendeten Link.']);
 
     case 'signin':
         if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
         $in = friseur_body();
         $identifier = trim((string) ($in['email'] ?? $in['identifier'] ?? ''));
         $password = (string) ($in['password'] ?? '');
-        $stmt = $pdo->prepare('SELECT id, password_hash FROM profiles WHERE identifier = ?');
+        $stmt = $pdo->prepare('SELECT id, password_hash, verified FROM profiles WHERE identifier = ?');
         $stmt->execute([$identifier]);
         $row = $stmt->fetch();
         if (!$row || !password_verify($password, $row['password_hash'])) {
             usleep(300000);
             friseur_json(['error' => 'E-Mail/Name oder Passwort ist falsch.'], 401);
         }
+        if ((int) $row['verified'] !== 1) {
+            friseur_json(['error' => 'Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse (Link in der Registrierungs-Mail).'], 403);
+        }
         session_regenerate_id(true);
         $_SESSION['profile_id'] = (int) $row['id'];
         friseur_json(['profile' => friseur_current_profile($pdo)]);
+
+    case 'verify_email':
+        $in = $method === 'POST' ? friseur_body() : $_GET;
+        $token = trim((string) ($in['token'] ?? ''));
+        if ($token === '' || !preg_match('/^[a-f0-9]{64}$/', $token)) {
+            friseur_json(['error' => 'Ungültiger Bestätigungslink.'], 400);
+        }
+        $stmt = $pdo->prepare('SELECT id, display_name, verification_expires FROM profiles WHERE verification_token = ?');
+        $stmt->execute([$token]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            friseur_json(['error' => 'Der Bestätigungslink ist ungültig oder wurde bereits verwendet.'], 400);
+        }
+        if (new DateTimeImmutable((string) $row['verification_expires']) < new DateTimeImmutable()) {
+            friseur_json(['error' => 'Der Bestätigungslink ist abgelaufen. Bitte registrieren Sie sich erneut.'], 400);
+        }
+        $pdo->prepare('UPDATE profiles SET verified = 1, verification_token = NULL, verification_expires = NULL WHERE id = ?')->execute([$row['id']]);
+        friseur_json(['ok' => true, 'name' => $row['display_name']]);
 
     case 'signout':
         $_SESSION = [];

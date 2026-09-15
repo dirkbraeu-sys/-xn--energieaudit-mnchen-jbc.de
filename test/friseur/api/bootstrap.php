@@ -23,6 +23,17 @@ if (!file_exists($dbConfigFile)) {
 }
 require_once $dbConfigFile;
 
+function friseur_ensure_column(PDO $pdo, string $table, string $column, string $definition): void
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?'
+    );
+    $stmt->execute([$table, $column]);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $pdo->exec("ALTER TABLE `$table` ADD COLUMN $definition");
+    }
+}
+
 function friseur_ensure_schema(PDO $pdo): void
 {
     static $done = false;
@@ -37,10 +48,16 @@ function friseur_ensure_schema(PDO $pdo): void
             role ENUM('customer','staff','owner') NOT NULL DEFAULT 'customer',
             staff_id VARCHAR(30) NULL,
             display_name VARCHAR(190) NOT NULL,
+            verified TINYINT(1) NOT NULL DEFAULT 1,
+            verification_token VARCHAR(64) NULL,
+            verification_expires DATETIME NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_identifier (identifier)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+    friseur_ensure_column($pdo, 'profiles', 'verified', "verified TINYINT(1) NOT NULL DEFAULT 1");
+    friseur_ensure_column($pdo, 'profiles', 'verification_token', "verification_token VARCHAR(64) NULL");
+    friseur_ensure_column($pdo, 'profiles', 'verification_expires', "verification_expires DATETIME NULL");
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS bookings (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -155,6 +172,32 @@ function friseur_send_booking_confirmation_mail(string $toEmail, string $custome
     $ok = mail($toEmail, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $headers);
     if (!$ok) {
         error_log('friseur_send_booking_confirmation_mail: mail() lieferte false für ' . $toEmail);
+    }
+    return $ok;
+}
+
+function friseur_send_verification_mail(string $toEmail, string $name, string $token): bool
+{
+    $link = 'https://xn--energieaudit-mnchen-jbc.de/test/friseur/?verify=' . urlencode($token);
+    $safeName = $name !== '' ? $name : 'Kunde/Kundin';
+    $subject = 'Bitte bestätigen Sie Ihre E-Mail-Adresse – Friseursalon München (Test)';
+    $body = "Hallo {$safeName},\n\n"
+        . "vielen Dank für Ihre Registrierung im Testbereich der Friseur-Terminbuchung.\n"
+        . "Bitte bestätigen Sie Ihre E-Mail-Adresse über folgenden Link (60 Minuten gültig):\n\n"
+        . $link . "\n\n"
+        . "Danach können Sie sich anmelden und Termine buchen.\n\n"
+        . "Falls Sie diese Registrierung nicht veranlasst haben, ignorieren Sie diese E-Mail einfach.\n\n"
+        . "Friseursalon München\n"
+        . "Hinweis: Dies ist eine Testumgebung, nicht öffentlich online.\n";
+
+    $headers = "From: " . friseur_mail_from_header() . "\r\n"
+        . "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/plain; charset=UTF-8\r\n"
+        . "Content-Transfer-Encoding: 8bit\r\n";
+
+    $ok = mail($toEmail, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $headers);
+    if (!$ok) {
+        error_log('friseur_send_verification_mail: mail() lieferte false für ' . $toEmail);
     }
     return $ok;
 }

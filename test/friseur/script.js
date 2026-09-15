@@ -141,10 +141,10 @@ async function loadCurrentProfile() {
 async function signUpCustomer(email, password, displayName) {
   try {
     const { profile } = await api("signup", { method: "POST", body: { email, password, display_name: displayName } });
+    // Backend legt nach der Registrierung noch keine Session an, solange die
+    // E-Mail-Adresse nicht über den zugesendeten Link bestätigt wurde.
     currentProfile = profile ? { id: profile.id, email: profile.identifier, role: profile.role, staffId: profile.staff_id, name: profile.display_name } : null;
-    // Unser Backend verlangt keine E-Mail-Bestätigung, session=true übersprint
-    // daher den entsprechenden Hinweis-Zweig im Aufrufer.
-    return { data: { profile: currentProfile, session: true }, error: null };
+    return { data: { profile: currentProfile, session: !!profile }, error: null };
   } catch (e) {
     return { data: null, error: { message: e.message } };
   }
@@ -1365,11 +1365,41 @@ async function renderAdminCustomers() {
 }
 
 /* ===========================================================
+   E-Mail-Bestätigung (Link aus der Registrierungs-Mail)
+   =========================================================== */
+async function handleEmailVerification() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("verify");
+  if (!token) return;
+
+  const banner = document.createElement("div");
+  banner.style.cssText = "position:fixed; top:0; left:0; right:0; z-index:9999; padding:14px 20px; text-align:center; font-weight:600; font-family:sans-serif;";
+  try {
+    const { name } = await api("verify_email", { method: "POST", body: { token } });
+    banner.style.background = "#e6f4ea";
+    banner.style.color = "#1e6b33";
+    banner.textContent = `✅ E-Mail bestätigt${name ? ", " + name : ""}! Sie können sich jetzt anmelden.`;
+  } catch (e) {
+    banner.style.background = "#fdecea";
+    banner.style.color = "#a33";
+    banner.textContent = `❌ ${e.message || "Bestätigung fehlgeschlagen."}`;
+  }
+  document.body.prepend(banner);
+  setTimeout(() => banner.remove(), 8000);
+
+  // URL bereinigen, damit ein Neuladen der Seite nicht erneut verifiziert.
+  params.delete("verify");
+  const query = params.toString();
+  window.history.replaceState({}, "", window.location.pathname + (query ? "?" + query : "") + window.location.hash);
+}
+
+/* ===========================================================
    Init
    =========================================================== */
 document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("hashchange", handleRoute);
 
+  await handleEmailVerification();
   await loadCurrentProfile();
   handleRoute();
   renderNavUser();
