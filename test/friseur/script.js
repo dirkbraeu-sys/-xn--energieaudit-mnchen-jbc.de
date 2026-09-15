@@ -695,8 +695,8 @@ async function renderCustomerBookingTab(profile) {
           ✅ Termin gebucht: <strong>${svc.name}</strong> bei <strong>${booking.staff}</strong> am
           <strong>${new Date(bookingState.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" })}</strong>
           um <strong>${booking.start} Uhr</strong> (bis ${booking.end} Uhr).
-          <br><span class="hint">Eine Bestätigung per E-Mail gibt es in dieser Testversion noch nicht –
-          dafür können Sie den Termin direkt in Ihren Kalender übernehmen, oder unter „Meine Termine" jederzeit nachsehen:</span>
+          <br><span class="hint">Eine Bestätigung wurde an Ihre E-Mail-Adresse gesendet. Sie können den Termin außerdem
+          direkt in Ihren Kalender übernehmen, oder unter „Meine Termine" jederzeit nachsehen:</span>
           <div class="form-actions" style="margin-top:10px;">
             <button type="button" class="btn btn-light" id="ics-btn-${booking.id}">📅 .ics herunterladen</button>
             <a class="btn btn-light" href="${googleCalendarLink(booking)}" target="_blank" rel="noopener">📅 Zu Google Kalender</a>

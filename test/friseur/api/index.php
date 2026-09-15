@@ -133,19 +133,37 @@ switch ($action) {
         }
         $customerId = $manual ? null : (int) $me['id'];
         $customerName = $manual ? trim((string) ($in['customer_name'] ?? '')) : $me['display_name'];
+        $service = (string) ($in['service'] ?? '');
+        $date = (string) ($in['date'] ?? '');
+        $startTime = (string) ($in['start_time'] ?? '');
+        $endTime = (string) ($in['end_time'] ?? '');
+        $staffId = (string) ($in['staff_id'] ?? '');
+        $staffName = (string) ($in['staff_name'] ?? '');
         $stmt = $pdo->prepare('INSERT INTO bookings (customer_id, customer_name, service, date, start_time, end_time, staff_id, staff_name, manual) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $customerId,
             $customerName,
-            (string) ($in['service'] ?? ''),
-            (string) ($in['date'] ?? ''),
-            (string) ($in['start_time'] ?? ''),
-            (string) ($in['end_time'] ?? ''),
-            (string) ($in['staff_id'] ?? ''),
-            (string) ($in['staff_name'] ?? ''),
+            $service,
+            $date,
+            $startTime,
+            $endTime,
+            $staffId,
+            $staffName,
             $manual ? 1 : 0,
         ]);
-        friseur_json(['id' => (int) $pdo->lastInsertId()]);
+        $newId = (int) $pdo->lastInsertId();
+
+        if (!$manual && filter_var($me['identifier'], FILTER_VALIDATE_EMAIL)) {
+            friseur_send_booking_confirmation_mail($me['identifier'], $customerName, [
+                'service' => $service,
+                'date' => $date,
+                'start_time' => $startTime,
+                'end_time' => $endTime,
+                'staff_name' => $staffName,
+            ]);
+        }
+
+        friseur_json(['id' => $newId]);
 
     case 'booking_update':
         if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);

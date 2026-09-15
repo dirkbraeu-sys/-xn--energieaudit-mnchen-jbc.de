@@ -124,3 +124,37 @@ function friseur_require_login(PDO $pdo): array
     }
     return $p;
 }
+
+function friseur_mail_from_header(): string
+{
+    return '=?UTF-8?B?' . base64_encode('Friseursalon München (Test)') . '?=' . ' <noreply@xn--energieaudit-mnchen-jbc.de>';
+}
+
+function friseur_send_booking_confirmation_mail(string $toEmail, string $customerName, array $booking): bool
+{
+    $dateFormatted = date('d.m.Y', strtotime((string) $booking['date']));
+    $timeFormatted = substr((string) $booking['start_time'], 0, 5) . '–' . substr((string) $booking['end_time'], 0, 5) . ' Uhr';
+    $safeName = $customerName !== '' ? $customerName : 'Kunde/Kundin';
+    $subject = 'Ihre Terminbestätigung – Friseursalon München (Test)';
+    $body = "Hallo {$safeName},\n\n"
+        . "vielen Dank für Ihre Terminbuchung. Hier die Details:\n\n"
+        . "Anwendung: {$booking['service']}\n"
+        . "Datum:     {$dateFormatted}\n"
+        . "Uhrzeit:   {$timeFormatted}\n"
+        . "Bei:       {$booking['staff_name']}\n\n"
+        . "Sie können Ihren Termin jederzeit online unter \"Meine Termine\" einsehen, ändern oder stornieren.\n\n"
+        . "Falls Sie diesen Termin nicht gebucht haben, kontaktieren Sie uns bitte.\n\n"
+        . "Friseursalon München\n"
+        . "Hinweis: Dies ist eine Testumgebung, nicht öffentlich online.\n";
+
+    $headers = "From: " . friseur_mail_from_header() . "\r\n"
+        . "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/plain; charset=UTF-8\r\n"
+        . "Content-Transfer-Encoding: 8bit\r\n";
+
+    $ok = mail($toEmail, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $headers);
+    if (!$ok) {
+        error_log('friseur_send_booking_confirmation_mail: mail() lieferte false für ' . $toEmail);
+    }
+    return $ok;
+}
