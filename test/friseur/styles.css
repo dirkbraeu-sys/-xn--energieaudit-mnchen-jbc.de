@@ -156,6 +156,9 @@ img{max-width:100%;display:block;}
 .hero-visual .scene-illustration{
   position:absolute; inset:0; width:100%; height:100%;
 }
+.hero-visual--photo img{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+}
 .hero-visual .caption{
   position:absolute; left:0; right:0; bottom:0;
   padding:16px 20px; font-size:.78rem; color:#fff;

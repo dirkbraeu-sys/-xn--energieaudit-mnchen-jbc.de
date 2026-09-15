@@ -467,8 +467,8 @@ function authFormHTML(embedded) {
         </div>
       ` : ""}
       <div class="form-row">
-        <label for="auth-email">E-Mail-Adresse</label>
-        <input id="auth-email" type="email" autocomplete="email" placeholder="ihre@email.de" required>
+        <label for="auth-email">${isSignup ? "E-Mail-Adresse" : "E-Mail-Adresse oder Benutzername"}</label>
+        <input id="auth-email" type="${isSignup ? "email" : "text"}" autocomplete="${isSignup ? "email" : "username"}" placeholder="${isSignup ? "ihre@email.de" : "ihre@email.de oder Benutzername"}" required>
       </div>
       <div class="form-row">
         <label for="auth-pass">Passwort</label>
@@ -898,8 +898,8 @@ function renderSalonLogin(root) {
     <form id="salon-login-form">
       <div id="salon-login-error"></div>
       <div class="form-row">
-        <label for="salon-email">E-Mail-Adresse</label>
-        <input id="salon-email" type="email" autocomplete="email" required>
+        <label for="salon-email">E-Mail-Adresse oder Benutzername</label>
+        <input id="salon-email" type="text" autocomplete="username" placeholder="ihre@email.de oder Benutzername" required>
       </div>
       <div class="form-row">
         <label for="salon-pass">Passwort</label>
