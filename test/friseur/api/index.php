@@ -391,7 +391,7 @@ switch ($action) {
 
     case 'reviews_list':
         // Öffentlich lesbar (Startseite).
-        $rows = $pdo->query('SELECT id, first_name, body, created_at FROM reviews ORDER BY created_at DESC LIMIT 30')->fetchAll();
+        $rows = $pdo->query('SELECT id, first_name, body, rating, created_at FROM reviews ORDER BY created_at DESC LIMIT 30')->fetchAll();
         friseur_json(['reviews' => $rows]);
 
     case 'review_create':
@@ -399,18 +399,22 @@ switch ($action) {
         $me = friseur_require_login($pdo);
         $in = friseur_body();
         $body = trim((string) ($in['body'] ?? ''));
+        $rating = (int) ($in['rating'] ?? 0);
         if ($body === '' || mb_strlen($body) < 5) {
             friseur_json(['error' => 'Bitte eine Meinung mit mindestens 5 Zeichen eingeben.'], 400);
         }
         if (mb_strlen($body) > 1000) {
             friseur_json(['error' => 'Bitte kürzer fassen (max. 1000 Zeichen).'], 400);
         }
+        if ($rating < 1 || $rating > 5) {
+            friseur_json(['error' => 'Bitte eine Sternebewertung von 1 bis 5 auswählen.'], 400);
+        }
         // Vorname aus dem hinterlegten Namen ableiten, damit niemand einen fremden
         // Namen vortäuschen kann - echte Meinungen von echten angemeldeten Kund:innen.
         $firstName = trim(explode(' ', (string) $me['display_name'])[0]);
         $firstName = $firstName !== '' ? $firstName : $me['display_name'];
-        $ins = $pdo->prepare('INSERT INTO reviews (customer_id, first_name, body) VALUES (?, ?, ?)');
-        $ins->execute([$me['id'], $firstName, $body]);
+        $ins = $pdo->prepare('INSERT INTO reviews (customer_id, first_name, body, rating) VALUES (?, ?, ?, ?)');
+        $ins->execute([$me['id'], $firstName, $body, $rating]);
         friseur_json(['ok' => true, 'id' => (int) $pdo->lastInsertId()]);
 
     case 'review_delete':

@@ -111,10 +111,12 @@ function friseur_ensure_schema(PDO $pdo): void
             customer_id INT UNSIGNED NOT NULL,
             first_name VARCHAR(100) NOT NULL,
             body TEXT NOT NULL,
+            rating TINYINT UNSIGNED NOT NULL DEFAULT 5,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             KEY idx_customer (customer_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+    friseur_ensure_column($pdo, 'reviews', 'rating', "rating TINYINT UNSIGNED NOT NULL DEFAULT 5");
 
     // Demo-Zugänge einmalig anlegen (entspricht den Angaben aus der README).
     $seed = [

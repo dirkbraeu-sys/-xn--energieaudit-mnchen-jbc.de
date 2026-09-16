@@ -277,6 +277,14 @@ section{padding:78px 0;}
 .review-body{margin:0; font-style:italic; color:var(--ink);}
 .review-foot{display:flex; justify-content:space-between; align-items:center; font-size:.85rem;}
 .review-author{font-weight:600; color:var(--gold-dark);}
+.review-stars{color:var(--gold); font-size:1.1rem; letter-spacing:1px;}
+
+.star-rating{display:flex; flex-direction:row-reverse; justify-content:flex-end; gap:2px; font-size:1.8rem; width:fit-content;}
+.star-rating input{position:absolute; opacity:0; width:0; height:0;}
+.form-row .star-rating label{color:var(--line); cursor:pointer; transition:color .15s; display:inline; font-weight:400; margin-bottom:0;}
+.star-rating input:checked ~ label,
+.star-rating label:hover,
+.star-rating label:hover ~ label{color:var(--gold);}
 
 /* ---------- Öffnungszeiten ---------- */
 .hours-table{width:100%; max-width:480px; margin:0 auto; border-collapse:collapse;}

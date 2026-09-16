@@ -371,9 +371,9 @@ async function dbFetchReviews() {
     return reviews;
   } catch (e) { console.error(e); return []; }
 }
-async function dbCreateReview(body) {
+async function dbCreateReview(body, rating) {
   try {
-    await api("review_create", { method: "POST", body: { body } });
+    await api("review_create", { method: "POST", body: { body, rating } });
     return { error: null };
   } catch (e) {
     return { error: { message: e.message } };
@@ -384,6 +384,22 @@ async function dbDeleteReview(id) {
 }
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+function starsHTML(rating) {
+  const r = Math.max(0, Math.min(5, Math.round(rating)));
+  return `<span class="review-stars" aria-label="${r} von 5 Sternen">${"★".repeat(r)}${"☆".repeat(5 - r)}</span>`;
+}
+function starRatingInputHTML(id) {
+  // Reihenfolge 5→1 im Markup, per CSS optisch umgedreht (klassischer Nur-CSS-Sterne-Trick),
+  // damit Hover/Auswahl ohne JavaScript alle Sterne bis zur gewählten Position einfärbt.
+  return `
+    <div class="star-rating" id="${id}">
+      ${[5, 4, 3, 2, 1].map(n => `
+        <input type="radio" name="${id}-input" id="${id}-${n}" value="${n}">
+        <label for="${id}-${n}" title="${n} Stern${n === 1 ? "" : "e"}">★</label>
+      `).join("")}
+    </div>
+  `;
 }
 
 async function renderReviews() {
@@ -396,6 +412,10 @@ async function renderReviews() {
     ${currentProfile ? `
       <form id="review-form" style="max-width:560px; margin:0 auto 32px;">
         <div class="form-row">
+          <label>Ihre Bewertung</label>
+          ${starRatingInputHTML("review-rating")}
+        </div>
+        <div class="form-row">
           <label for="review-body">Ihre Meinung</label>
           <textarea id="review-body" rows="3" maxlength="1000" spellcheck="true" lang="de" placeholder="Wie war Ihr Besuch bei uns?" required></textarea>
         </div>
@@ -404,12 +424,18 @@ async function renderReviews() {
           <button type="submit" class="btn btn-primary">Meinung veröffentlichen</button>
         </div>
       </form>
-    ` : `<p class="hint" style="text-align:center; max-width:480px; margin:0 auto 28px;">Nur angemeldete Kund:innen können eine Meinung hinterlassen. <a href="#termin">Jetzt anmelden</a></p>`}
+    ` : `
+      <p class="hint" style="text-align:center; max-width:480px; margin:0 auto 28px;">
+        Nur angemeldete Kund:innen können eine Meinung hinterlassen.
+        <button type="button" class="link-danger" id="review-login-link" style="color:var(--gold-dark);">Jetzt anmelden</button>
+      </p>
+    `}
     <div class="reviews-grid" id="reviews-list">
       ${reviews.length === 0
         ? `<p class="hint" style="text-align:center; grid-column:1/-1;">Noch keine Kundenmeinungen vorhanden.</p>`
         : reviews.map(r => `
           <div class="review-card">
+            ${starsHTML(r.rating)}
             <p class="review-body">„${escapeHtml(r.body)}"</p>
             <div class="review-foot">
               <span class="review-author">– ${escapeHtml(r.first_name)}</span>
@@ -420,15 +446,26 @@ async function renderReviews() {
     </div>
   `;
 
+  document.getElementById("review-login-link")?.addEventListener("click", () => {
+    forceLoginPrompt = true;
+    customerView = "buchen";
+    renderBooking();
+  });
+
   document.getElementById("review-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const textarea = document.getElementById("review-body");
     const errBox = document.getElementById("review-error");
+    const ratingInput = document.querySelector('input[name="review-rating-input"]:checked');
+    if (!ratingInput) {
+      errBox.innerHTML = `<div class="alert alert-error">Bitte eine Sternebewertung auswählen.</div>`;
+      return;
+    }
     const btn = e.target.querySelector("button[type=submit]");
     const origText = btn.textContent;
     btn.disabled = true;
     btn.textContent = "⏳ Wird gespeichert …";
-    const { error } = await dbCreateReview(textarea.value.trim());
+    const { error } = await dbCreateReview(textarea.value.trim(), Number(ratingInput.value));
     btn.disabled = false;
     btn.textContent = origText;
     if (error) {
