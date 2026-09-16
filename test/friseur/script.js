@@ -1154,7 +1154,7 @@ function renderNavUser() {
     el.innerHTML = `
       <span class="user-chip">👤 ${currentProfile.name} <button id="nav-logout">abmelden</button></span>
       <a href="#termin" class="btn btn-light" id="nav-meine-termine-btn">Meine Termine</a>
-      <a href="#termin" class="btn btn-primary">Termin buchen</a>
+      <a href="#termin" class="btn btn-primary" id="nav-termin-buchen-btn">Termin buchen</a>
     `;
     document.getElementById("nav-logout").addEventListener("click", async () => {
       await signOutUser();
@@ -1165,13 +1165,22 @@ function renderNavUser() {
       customerView = "meine";
       renderBooking();
     });
+    document.getElementById("nav-termin-buchen-btn").addEventListener("click", () => {
+      customerView = "buchen";
+      renderBooking();
+    });
   } else {
     el.innerHTML = `
       <a href="#termin" class="btn btn-light" id="nav-login-btn">Anmelden</a>
-      <a href="#termin" class="btn btn-primary">Termin buchen</a>
+      <a href="#termin" class="btn btn-primary" id="nav-termin-buchen-btn">Termin buchen</a>
     `;
     document.getElementById("nav-login-btn").addEventListener("click", () => {
       forceLoginPrompt = true;
+      customerView = "buchen";
+      renderBooking();
+    });
+    document.getElementById("nav-termin-buchen-btn").addEventListener("click", () => {
+      forceLoginPrompt = false;
       customerView = "buchen";
       renderBooking();
     });
