@@ -1254,6 +1254,7 @@ async function renderCustomerAppointmentsTab(profile) {
 
   content.querySelectorAll("[data-cancel]").forEach(btn => {
     btn.addEventListener("click", async () => {
+      if (!confirm("Diesen Termin wirklich stornieren?")) return;
       const errBox = document.getElementById("cancel-error");
       btn.disabled = true;
       try {
@@ -1777,6 +1778,7 @@ async function renderAdminBookings(lockedStaffId) {
 
   content.querySelectorAll("[data-admin-cancel]").forEach(btn => {
     btn.addEventListener("click", async () => {
+      if (!confirm("Diesen Termin wirklich stornieren?")) return;
       if (editingBookingId === btn.dataset.adminCancel) editingBookingId = null;
       await dbDeleteBooking(btn.dataset.adminCancel);
       renderAdminBookings(lockedStaffId);
@@ -1791,6 +1793,7 @@ async function renderAdminBookings(lockedStaffId) {
 
   content.querySelectorAll("[data-upcoming-cancel]").forEach(btn => {
     btn.addEventListener("click", async () => {
+      if (!confirm("Diesen Termin wirklich stornieren?")) return;
       if (editingBookingId === btn.dataset.upcomingCancel) editingBookingId = null;
       await dbDeleteBooking(btn.dataset.upcomingCancel);
       renderAdminBookings(lockedStaffId);
@@ -1988,6 +1991,7 @@ async function renderAdminCustomers() {
 
   content.querySelectorAll("[data-del-booking]").forEach(btn => {
     btn.addEventListener("click", async () => {
+      if (!confirm("Diesen Termin wirklich stornieren?")) return;
       await dbDeleteBooking(btn.dataset.delBooking);
       renderAdminCustomers();
     });
