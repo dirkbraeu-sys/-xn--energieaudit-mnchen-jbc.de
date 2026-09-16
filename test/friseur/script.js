@@ -71,14 +71,14 @@ function findServiceIdByName(name) {
 
 // Öffnungszeiten: 0=So ... 6=Sa
 const OPENING_HOURS = {
-  1: { open: "09:00", close: "18:00" }, // Mo geschlossen -> siehe CLOSED_DAYS
+  1: { open: "09:00", close: "18:00" },
   2: { open: "09:00", close: "18:00" },
   3: { open: "09:00", close: "18:00" },
   4: { open: "09:00", close: "18:00" },
   5: { open: "09:00", close: "20:00" },
   6: { open: "09:00", close: "14:00" }
 };
-const CLOSED_DAYS = [0, 1]; // So, Mo geschlossen
+const CLOSED_DAYS = [0]; // nur So geschlossen
 
 const SLOT_STEP = 15; // Minuten-Raster für Terminvorschläge
 
