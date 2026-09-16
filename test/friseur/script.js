@@ -1210,8 +1210,15 @@ async function renderCustomerAppointmentsTab(profile) {
   const apptLine = (b) => `${new Date(b.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" })}
     · ${b.start}–${b.end} Uhr · ${b.service} · bei ${b.staff || "?"}`;
 
+  // Stornierung ist online nur bis 24h vor dem Termin möglich (siehe api/index.php,
+  // booking_delete) - hier schon clientseitig gespiegelt, damit der Button gar nicht
+  // erst anklickbar wirkt statt erst nach einer fehlgeschlagenen Anfrage abzubrechen.
+  const isCancellable = (b) => (new Date(`${b.date}T${b.start}:00`).getTime() - Date.now()) >= 24 * 3600 * 1000;
+
   content.innerHTML = `
     <h3 style="margin-top:0;">${upcoming.length === 0 ? "Keine bevorstehenden Termine" : `${upcoming.length} bevorstehende${upcoming.length === 1 ? "r Termin" : " Termine"}`}</h3>
+    ${upcoming.length > 0 ? `<p class="hint" style="background:none; padding:0; margin:-8px 0 14px;">Eine Stornierung ist online bis 24 Stunden vor dem Termin möglich. Für kurzfristige Änderungen rufen Sie uns bitte an.</p>` : ""}
+    <div id="cancel-error"></div>
     <ul class="appt-list" id="my-appts">
       ${upcoming.length === 0
         ? `<li class="hint" style="background:none;">Sie haben aktuell keine bevorstehenden Termine.</li>`
@@ -1220,7 +1227,9 @@ async function renderCustomerAppointmentsTab(profile) {
             <span>${apptLine(b)}</span>
             <span style="display:flex; gap:10px; align-items:center;">
               <button class="link-danger" data-ics="${b.id}" style="color:var(--gold-dark);">📅 Kalender</button>
-              <button class="link-danger" data-cancel="${b.id}">stornieren</button>
+              ${isCancellable(b)
+                ? `<button class="link-danger" data-cancel="${b.id}">stornieren</button>`
+                : `<span class="hint" style="background:none; padding:0; color:var(--ink-soft);" title="Eine Online-Stornierung ist ab 24 Stunden vor dem Termin nicht mehr möglich.">nicht mehr stornierbar</span>`}
             </span>
           </li>
         `).join("")}
@@ -1244,8 +1253,15 @@ async function renderCustomerAppointmentsTab(profile) {
 
   content.querySelectorAll("[data-cancel]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      await dbDeleteBooking(btn.dataset.cancel);
-      renderBooking();
+      const errBox = document.getElementById("cancel-error");
+      btn.disabled = true;
+      try {
+        await dbDeleteBooking(btn.dataset.cancel);
+        renderBooking();
+      } catch (err) {
+        errBox.innerHTML = `<div class="alert alert-error">${err.message || "Stornierung fehlgeschlagen."}</div>`;
+        btn.disabled = false;
+      }
     });
   });
 

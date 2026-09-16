@@ -361,6 +361,17 @@ switch ($action) {
             || ($me['role'] === 'staff' && $row['staff_id'] === $me['staff_id'])
             || ((int) $row['customer_id'] === (int) $me['id']);
         if (!$allowed) friseur_json(['error' => 'Kein Zugriff.'], 403);
+
+        // Kund:innen dürfen selbst nur bis 24 Stunden vor dem Termin stornieren;
+        // das Salon-Team (Inhaber:in/Mitarbeiter:in) kann jederzeit stornieren,
+        // z. B. bei kurzfristigen Absagen durch die Kundschaft am Telefon.
+        if ($me['role'] === 'customer') {
+            $start = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $row['date'] . ' ' . $row['start_time']);
+            if ($start && $start->getTimestamp() - time() < 24 * 3600) {
+                friseur_json(['error' => 'Eine Stornierung ist online nur bis 24 Stunden vor dem Termin möglich. Bitte kontaktieren Sie uns für kurzfristige Änderungen telefonisch.'], 403);
+            }
+        }
+
         $pdo->prepare('DELETE FROM bookings WHERE id = ?')->execute([$id]);
 
         // Wartelisten-Eintrag benachrichtigen, falls vorhanden (ältester zuerst, nur einmal).
