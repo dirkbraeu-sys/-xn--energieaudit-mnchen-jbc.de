@@ -978,7 +978,7 @@ async function renderCustomerBookingTab(profile) {
   let finalHTML = "";
   if (timeChosen) {
     finalHTML = profile
-      ? confirmSummaryHTML(service)
+      ? await confirmSummaryHTML(service)
       : `<div class="alert alert-info">Fast geschafft – zum Abschluss bitte anmelden oder registrieren:</div>${authFormHTML(true)}`;
   }
 
@@ -1183,8 +1183,17 @@ async function renderTermineSlotsHTML(service, staffId) {
   `;
 }
 
-function confirmSummaryHTML(service) {
-  const staffLabel = bookingState.staffId === "egal" ? "automatische Zuteilung" : `bei ${staffNameById(bookingState.staffId)}`;
+async function confirmSummaryHTML(service) {
+  let staffLabel;
+  if (bookingState.staffId === "egal") {
+    // Bei "Alle" schon in der Zusammenfassung zeigen, wer voraussichtlich zugeteilt
+    // wird - dieselbe Ermittlung wie beim tatsächlichen Buchen (resolveStaffForSlot),
+    // damit hier keine Ueberraschung entsteht.
+    const assignedStaffId = await resolveStaffForSlot(bookingState.date, bookingState.start, service.duration, "egal");
+    staffLabel = `automatische Zuteilung – voraussichtlich bei ${staffNameById(assignedStaffId)}`;
+  } else {
+    staffLabel = `bei ${staffNameById(bookingState.staffId)}`;
+  }
   return `
     <div class="alert alert-info">
       <strong>Zusammenfassung:</strong> ${service.name} am
