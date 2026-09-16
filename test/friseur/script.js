@@ -1918,12 +1918,16 @@ async function renderAdminCustomers() {
               <strong>${p.display_name}</strong> · ${p.identifier}${p.phone ? ` · 📞 ${p.phone}` : ""} ·
               <strong>${bookings.length}</strong> Termin${bookings.length === 1 ? "" : "e"}
             </span>
-            <span style="display:flex; gap:14px; align-items:center;">
+            <span style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+              <button type="button" class="link-danger" style="color:var(--gold-dark);" data-note-customer="${p.id}" data-note-name="${escapeHtml(p.display_name)}" data-note-current="${escapeHtml(p.notes || "")}">
+                ${p.notes ? "📝 Notiz" : "+ Notiz"}
+              </button>
               <button type="button" class="link-danger" style="color:var(--gold-dark);" data-toggle-customer="${p.id}">
                 ${expanded ? "Termine ausblenden" : "Termine anzeigen"}
               </button>
             </span>
           </div>
+          ${p.notes ? `<div class="hint" style="background:none; padding:0; margin-top:6px; font-size:.82rem;">📝 ${escapeHtml(p.notes)}</div>` : ""}
           ${expanded ? `
             <ul class="appt-list" style="margin-top:14px;">
               ${bookings.length === 0
@@ -1965,6 +1969,12 @@ async function renderAdminCustomers() {
       const id = btn.dataset.toggleCustomer;
       adminExpandedCustomer = adminExpandedCustomer === id ? null : id;
       renderAdminCustomers();
+    });
+  });
+
+  content.querySelectorAll("[data-note-customer]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      openCustomerNoteOverlay(btn.dataset.noteCustomer, btn.dataset.noteName, btn.dataset.noteCurrent, () => renderAdminCustomers());
     });
   });
 

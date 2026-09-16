@@ -203,7 +203,7 @@ switch ($action) {
     case 'profiles_list':
         $me = friseur_require_login($pdo);
         if ($me['role'] !== 'owner') friseur_json(['error' => 'Kein Zugriff.'], 403);
-        $rows = $pdo->query("SELECT id, identifier, role, staff_id, display_name, phone, created_at FROM profiles WHERE role = 'customer' ORDER BY created_at DESC")->fetchAll();
+        $rows = $pdo->query("SELECT id, identifier, role, staff_id, display_name, phone, notes, created_at FROM profiles WHERE role = 'customer' ORDER BY created_at DESC")->fetchAll();
         friseur_json(['profiles' => $rows]);
 
     // ---------- Bookings ----------
