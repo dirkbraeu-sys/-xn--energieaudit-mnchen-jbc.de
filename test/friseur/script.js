@@ -160,10 +160,13 @@ async function signOutUser() {
   try { await api("signout", { method: "POST", body: {} }); } catch (e) {}
   currentProfile = null;
 }
-async function updateCustomerPhone(phone) {
+async function updateCustomerProfile(name, phone) {
   try {
-    const { profile } = await api("update_phone", { method: "POST", body: { phone } });
-    if (currentProfile) currentProfile.phone = profile.phone || "";
+    const { profile } = await api("update_profile", { method: "POST", body: { name, phone } });
+    if (currentProfile) {
+      currentProfile.phone = profile.phone || "";
+      currentProfile.name = profile.display_name || currentProfile.name;
+    }
     return { data: { profile: currentProfile }, error: null };
   } catch (e) {
     return { data: null, error: { message: e.message } };
@@ -641,8 +644,7 @@ function closeMobileNav() {
    Terminbuchung (Kundenbereich)
    =========================================================== */
 const bookingState = { serviceId: null, date: null, start: null, staffId: null };
-let customerView = "buchen"; // "buchen" | "meine"
-let editingCustomerPhone = false; // steuert die Bearbeiten-Ansicht der Telefonnummer unter "Meine Termine"
+let customerView = "buchen"; // "buchen" | "meine" | "daten"
 let customerAuthMode = "login"; // "login" | "signup"
 // Wird über den "Anmelden"-Button im Header gesetzt: zeigt sofort das Login-
 // Formular, statt erst wieder durch die Terminauswahl zu führen, damit
@@ -882,6 +884,7 @@ function bookingShellHTML(profile) {
     <div class="steps">
       <span class="step-pill ${customerView === "buchen" ? "active" : ""}" id="ctab-buchen" style="cursor:pointer;">Termin buchen</span>
       <span class="step-pill ${customerView === "meine" ? "active" : ""}" id="ctab-meine" style="cursor:pointer;">Meine Termine</span>
+      <span class="step-pill ${customerView === "daten" ? "active" : ""}" id="ctab-daten" style="cursor:pointer;">Meine Daten</span>
     </div>
     <div id="customer-tab-content"><p class="hint">Lädt …</p></div>
   `;
@@ -900,15 +903,18 @@ async function bindBookingShell(profile) {
 
   document.getElementById("ctab-buchen").addEventListener("click", () => { customerView = "buchen"; forceLoginPrompt = false; renderBooking(); });
   document.getElementById("ctab-meine").addEventListener("click", () => { customerView = "meine"; renderBooking(); });
+  document.getElementById("ctab-daten").addEventListener("click", () => { customerView = "daten"; renderBooking(); });
 
-  if (customerView === "meine") {
+  if (customerView === "meine" || customerView === "daten") {
     if (!profile) {
       const content = document.getElementById("customer-tab-content");
       content.innerHTML = `
-        <div class="alert alert-info">Bitte melden Sie sich an, um Ihre Termine zu sehen.</div>
+        <div class="alert alert-info">Bitte melden Sie sich an, um ${customerView === "daten" ? "Ihre Daten zu verwalten" : "Ihre Termine zu sehen"}.</div>
         ${authFormHTML(true)}
       `;
       bindAuthForm(() => renderBooking());
+    } else if (customerView === "daten") {
+      await renderCustomerAccountTab(profile);
     } else {
       await renderCustomerAppointmentsTab(profile);
     }
@@ -1186,31 +1192,6 @@ async function renderCustomerAppointmentsTab(profile) {
   const mine = await dbFetchBookingsForCustomer(profile.id);
 
   content.innerHTML = `
-    <div class="form-row" id="phone-row" style="margin-bottom:20px;">
-      <label>Telefonnummer</label>
-      ${editingCustomerPhone ? `
-        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-          <input id="phone-edit-input" type="tel" value="${profile.phone || ""}" placeholder="z. B. 0170 1234567" style="max-width:260px;">
-          <button type="button" class="btn btn-primary" id="phone-save-btn">Speichern</button>
-          <button type="button" class="btn btn-light" id="phone-cancel-btn">Abbrechen</button>
-        </div>
-        <div id="phone-edit-error"></div>
-      ` : `
-        <div style="display:flex; gap:10px; align-items:center;">
-          <span>${profile.phone ? `📞 ${profile.phone}` : `<span class="hint" style="background:none; padding:0;">Keine Telefonnummer hinterlegt.</span>`}</span>
-          <button type="button" class="link-danger" style="color:var(--gold-dark);" id="phone-edit-btn">bearbeiten</button>
-        </div>
-      `}
-    </div>
-
-    <div class="form-row" style="margin-bottom:20px;">
-      <label>Passwort</label>
-      <div style="display:flex; gap:10px; align-items:center;">
-        <span class="hint" style="background:none; padding:0;">••••••••</span>
-        <button type="button" class="link-danger" style="color:var(--gold-dark);" id="password-change-btn">ändern</button>
-      </div>
-    </div>
-
     <h3 style="margin-top:0;">${mine.length === 0 ? "Keine gebuchten Termine" : `${mine.length} gebuchte${mine.length === 1 ? "r Termin" : " Termine"}`}</h3>
     <ul class="appt-list" id="my-appts">
       ${mine.length === 0
@@ -1231,33 +1212,6 @@ async function renderCustomerAppointmentsTab(profile) {
     </div>
   `;
 
-  document.getElementById("password-change-btn")?.addEventListener("click", () => {
-    openChangePasswordOverlay();
-  });
-
-  document.getElementById("phone-edit-btn")?.addEventListener("click", () => {
-    editingCustomerPhone = true;
-    renderCustomerAppointmentsTab(profile);
-  });
-  document.getElementById("phone-cancel-btn")?.addEventListener("click", () => {
-    editingCustomerPhone = false;
-    renderCustomerAppointmentsTab(profile);
-  });
-  document.getElementById("phone-save-btn")?.addEventListener("click", async () => {
-    const phone = document.getElementById("phone-edit-input").value.trim();
-    const errBox = document.getElementById("phone-edit-error");
-    const btn = document.getElementById("phone-save-btn");
-    btn.disabled = true;
-    const { error } = await updateCustomerPhone(phone);
-    btn.disabled = false;
-    if (error) {
-      errBox.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
-      return;
-    }
-    editingCustomerPhone = false;
-    renderCustomerAppointmentsTab(profile);
-  });
-
   document.getElementById("goto-booking-btn").addEventListener("click", () => {
     customerView = "buchen";
     renderBooking();
@@ -1275,6 +1229,63 @@ async function renderCustomerAppointmentsTab(profile) {
       const booking = mine.find(b => b.id === btn.dataset.ics);
       if (booking) downloadICS(booking);
     });
+  });
+}
+
+// "Meine Daten": eigene Kundenverwaltung – Name/Telefonnummer selbst pflegen
+// und von hier aus auch das Passwort ändern (mit Abfrage des alten Passworts).
+async function renderCustomerAccountTab(profile) {
+  const content = document.getElementById("customer-tab-content");
+
+  content.innerHTML = `
+    <h3 style="margin-top:0;">Meine Daten</h3>
+    <form id="account-form" style="max-width:480px;">
+      <div class="form-row">
+        <label for="account-name">Name</label>
+        <input id="account-name" type="text" value="${escapeHtml(profile.name || "")}" required>
+      </div>
+      <div class="form-row">
+        <label for="account-email">E-Mail-Adresse</label>
+        <input id="account-email" type="text" value="${escapeHtml(profile.email || "")}" disabled>
+        <p class="hint" style="margin-top:6px;">Die E-Mail-Adresse dient als Login und kann hier nicht geändert werden.</p>
+      </div>
+      <div class="form-row">
+        <label for="account-phone">Telefonnummer</label>
+        <input id="account-phone" type="tel" value="${escapeHtml(profile.phone || "")}" placeholder="z. B. 0170 1234567" required>
+      </div>
+      <div id="account-error"></div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Änderungen speichern</button>
+      </div>
+    </form>
+
+    <h3 style="margin-top:32px;">Passwort</h3>
+    <p class="hint" style="background:none; padding:0; margin-bottom:12px;">••••••••</p>
+    <div class="form-actions">
+      <button type="button" class="btn btn-light" id="account-changepw-btn">Passwort ändern</button>
+    </div>
+  `;
+
+  document.getElementById("account-changepw-btn").addEventListener("click", () => openChangePasswordOverlay());
+
+  document.getElementById("account-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("account-name").value.trim();
+    const phone = document.getElementById("account-phone").value.trim();
+    const errBox = document.getElementById("account-error");
+    const btn = e.target.querySelector("button[type=submit]");
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ Wird gespeichert …";
+    const { error } = await updateCustomerProfile(name, phone);
+    btn.disabled = false;
+    btn.textContent = origText;
+    if (error) {
+      errBox.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
+      return;
+    }
+    errBox.innerHTML = `<div class="alert alert-ok">✅ Ihre Daten wurden gespeichert.</div>`;
+    renderNavUser();
   });
 }
 

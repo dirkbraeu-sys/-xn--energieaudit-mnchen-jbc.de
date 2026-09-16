@@ -160,16 +160,20 @@ switch ($action) {
     case 'me':
         friseur_json(['profile' => friseur_current_profile($pdo)]);
 
-    case 'update_phone':
+    case 'update_profile':
         if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
         $me = friseur_require_login($pdo);
         $in = friseur_body();
+        $name = trim((string) ($in['name'] ?? ''));
         $phone = trim((string) ($in['phone'] ?? ''));
+        if ($name === '') {
+            friseur_json(['error' => 'Bitte einen Namen angeben.'], 400);
+        }
         if ($phone === '' || !preg_match('/^[0-9+\/\s()-]{5,30}$/', $phone)) {
             friseur_json(['error' => 'Bitte eine gültige Telefonnummer angeben.'], 400);
         }
-        $upd = $pdo->prepare('UPDATE profiles SET phone = ? WHERE id = ?');
-        $upd->execute([$phone, $me['id']]);
+        $upd = $pdo->prepare('UPDATE profiles SET display_name = ?, phone = ? WHERE id = ?');
+        $upd->execute([$name, $phone, $me['id']]);
         friseur_json(['profile' => friseur_current_profile($pdo)]);
 
     case 'change_password':
