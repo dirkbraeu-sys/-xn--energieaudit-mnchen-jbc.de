@@ -172,6 +172,25 @@ switch ($action) {
         $upd->execute([$phone, $me['id']]);
         friseur_json(['profile' => friseur_current_profile($pdo)]);
 
+    case 'change_password':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $me = friseur_require_login($pdo);
+        $in = friseur_body();
+        $current = (string) ($in['current_password'] ?? '');
+        $new = (string) ($in['new_password'] ?? '');
+        $row = $pdo->prepare('SELECT password_hash FROM profiles WHERE id = ?');
+        $row->execute([$me['id']]);
+        $hash = $row->fetchColumn();
+        if (!$hash || !password_verify($current, $hash)) {
+            friseur_json(['error' => 'Das aktuelle Passwort ist nicht korrekt.'], 400);
+        }
+        if (!friseur_valid_password($new)) {
+            friseur_json(['error' => FRISEUR_PASSWORT_HINWEIS], 400);
+        }
+        $newHash = password_hash($new, PASSWORD_DEFAULT);
+        $pdo->prepare('UPDATE profiles SET password_hash = ? WHERE id = ?')->execute([$newHash, $me['id']]);
+        friseur_json(['ok' => true]);
+
     // ---------- Profiles (nur Inhaber) ----------
 
     case 'profiles_list':

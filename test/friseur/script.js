@@ -1203,6 +1203,14 @@ async function renderCustomerAppointmentsTab(profile) {
       `}
     </div>
 
+    <div class="form-row" style="margin-bottom:20px;">
+      <label>Passwort</label>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <span class="hint" style="background:none; padding:0;">••••••••</span>
+        <button type="button" class="link-danger" style="color:var(--gold-dark);" id="password-change-btn">ändern</button>
+      </div>
+    </div>
+
     <h3 style="margin-top:0;">${mine.length === 0 ? "Keine gebuchten Termine" : `${mine.length} gebuchte${mine.length === 1 ? "r Termin" : " Termine"}`}</h3>
     <ul class="appt-list" id="my-appts">
       ${mine.length === 0
@@ -1222,6 +1230,10 @@ async function renderCustomerAppointmentsTab(profile) {
       <button type="button" class="btn btn-light" id="goto-booking-btn">+ Neuen Termin buchen</button>
     </div>
   `;
+
+  document.getElementById("password-change-btn")?.addEventListener("click", () => {
+    openChangePasswordOverlay();
+  });
 
   document.getElementById("phone-edit-btn")?.addEventListener("click", () => {
     editingCustomerPhone = true;
@@ -1445,7 +1457,9 @@ function renderSalonLogin(root) {
 async function renderOwnerPanel(root) {
   root.innerHTML = `
     <p class="hint" style="text-align:right;">
-      Angemeldet als Inhaber:in · <button class="link-danger" id="admin-logout-btn">abmelden</button>
+      Angemeldet als Inhaber:in ·
+      <button class="link-danger" style="color:var(--gold-dark);" id="admin-changepw-btn">Passwort ändern</button> ·
+      <button class="link-danger" id="admin-logout-btn">abmelden</button>
     </p>
     <div class="steps">
       <span class="step-pill ${adminView === "termine" ? "active" : ""}" id="tab-termine" style="cursor:pointer;">Tagesübersicht</span>
@@ -1455,6 +1469,7 @@ async function renderOwnerPanel(root) {
     <div id="admin-tab-content"><p class="hint">Lädt …</p></div>
   `;
 
+  document.getElementById("admin-changepw-btn").addEventListener("click", () => openChangePasswordOverlay());
   document.getElementById("admin-logout-btn").addEventListener("click", async () => {
     await signOutUser();
     renderAdmin();
@@ -1472,7 +1487,9 @@ async function renderStaffPanel(root) {
   const staffId = currentProfile.staffId;
   root.innerHTML = `
     <p class="hint" style="text-align:right;">
-      Angemeldet als <strong>${currentProfile.name}</strong> · <button class="link-danger" id="staff-logout-btn">abmelden</button>
+      Angemeldet als <strong>${currentProfile.name}</strong> ·
+      <button class="link-danger" style="color:var(--gold-dark);" id="staff-changepw-btn">Passwort ändern</button> ·
+      <button class="link-danger" id="staff-logout-btn">abmelden</button>
     </p>
     <div class="steps">
       <span class="step-pill ${staffView === "termine" ? "active" : ""}" id="stab-termine" style="cursor:pointer;">Meine Termine</span>
@@ -1481,6 +1498,7 @@ async function renderStaffPanel(root) {
     <div id="admin-tab-content"><p class="hint">Lädt …</p></div>
   `;
 
+  document.getElementById("staff-changepw-btn").addEventListener("click", () => openChangePasswordOverlay());
   document.getElementById("staff-logout-btn").addEventListener("click", async () => {
     await signOutUser();
     renderAdmin();
@@ -2001,6 +2019,87 @@ function handlePasswordResetLink() {
   params.delete("reset");
   const query = params.toString();
   window.history.replaceState({}, "", window.location.pathname + (query ? "?" + query : "") + window.location.hash);
+}
+
+/* ===========================================================
+   Passwort ändern (eingeloggt, mit Abfrage des alten Passworts) –
+   nutzbar aus dem Kundenbereich ("Meine Termine") sowie aus dem
+   Inhaber-/Mitarbeiter:innen-Bereich.
+   =========================================================== */
+function openChangePasswordOverlay() {
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed; inset:0; z-index:9999; background:rgba(42,36,32,.55); display:flex; align-items:center; justify-content:center; padding:20px;";
+  overlay.innerHTML = `
+    <div style="background:#fff; border-radius:14px; padding:28px; max-width:420px; width:100%; font-family:sans-serif; box-shadow:0 20px 50px rgba(0,0,0,.3);">
+      <h3 style="margin-top:0; font-family:Georgia, serif;">Passwort ändern</h3>
+      <div id="changepw-error"></div>
+      <form id="changepw-form">
+        <div class="form-row">
+          <label for="changepw-current">Aktuelles Passwort</label>
+          <div class="pw-field">
+            <input id="changepw-current" type="password" autocomplete="current-password" required>
+            <button type="button" class="pw-eye" data-target="changepw-current" aria-label="Passwort anzeigen">👁️</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="changepw-new">Neues Passwort</label>
+          <div class="pw-field">
+            <input id="changepw-new" type="password" autocomplete="new-password" minlength="8" placeholder="mind. 8 Zeichen" required>
+            <button type="button" class="pw-eye" data-target="changepw-new" aria-label="Passwort anzeigen">👁️</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="changepw-new2">Neues Passwort wiederholen</label>
+          <div class="pw-field">
+            <input id="changepw-new2" type="password" autocomplete="new-password" minlength="8" placeholder="Passwort wiederholen" required>
+            <button type="button" class="pw-eye" data-target="changepw-new2" aria-label="Passwort anzeigen">👁️</button>
+          </div>
+        </div>
+        ${passwordChecklistHTML("changepw-checklist")}
+        <div class="form-actions" style="margin-top:16px;">
+          <button type="submit" class="btn btn-primary">Passwort speichern</button>
+          <button type="button" class="btn btn-light" id="changepw-cancel">Abbrechen</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  bindPasswordEyeToggles(overlay);
+  bindPasswordChecklist("changepw-new", "changepw-checklist");
+
+  overlay.querySelector("#changepw-cancel").addEventListener("click", () => overlay.remove());
+  overlay.querySelector("#changepw-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const current = overlay.querySelector("#changepw-current").value;
+    const pw = overlay.querySelector("#changepw-new").value;
+    const pw2 = overlay.querySelector("#changepw-new2").value;
+    const errBox = overlay.querySelector("#changepw-error");
+    if (pw !== pw2) {
+      errBox.innerHTML = `<div class="alert alert-error">Die neuen Passwörter stimmen nicht überein.</div>`;
+      return;
+    }
+    if (!isValidPassword(pw)) {
+      errBox.innerHTML = `<div class="alert alert-error">${PASSWORT_HINWEIS}</div>`;
+      return;
+    }
+    const btn = e.target.querySelector("button[type=submit]");
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ Wird gespeichert …";
+    try {
+      await api("change_password", { method: "POST", body: { current_password: current, new_password: pw } });
+    } catch (err) {
+      errBox.innerHTML = `<div class="alert alert-error">${err.message || "Passwort konnte nicht geändert werden."}</div>`;
+      btn.disabled = false;
+      btn.textContent = origText;
+      return;
+    }
+    overlay.querySelector("div").innerHTML = `
+      <p>✅ Passwort erfolgreich geändert.</p>
+      <div class="form-actions"><button type="button" class="btn btn-primary" id="changepw-close">Schließen</button></div>
+    `;
+    overlay.querySelector("#changepw-close").addEventListener("click", () => overlay.remove());
+  });
 }
 
 /* ===========================================================
