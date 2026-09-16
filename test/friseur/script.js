@@ -634,22 +634,28 @@ function authFormHTML(embedded) {
 // rerender: wird nach Tab-Wechsel (Anmelden/Registrieren) und nach erfolgreichem
 // Login/Registrieren aufgerufen – zeigt je nach Kontext die Buchungsübersicht,
 // "Meine Termine" oder (mitten im Assistenten) direkt den Bestätigen-Schritt.
-function bindAuthForm(rerender) {
+// onSuccess: wird nach erfolgreichem Anmelden/Registrieren aufgerufen (führt meist weiter,
+// z. B. zur Buchungsbestätigung). onModeChange: wird nur beim Umschalten der Tabs
+// (Anmelden/Registrieren/Passwort vergessen) aufgerufen – zeichnet lediglich dasselbe
+// Formular neu, OHNE weiterzuspringen. Fehlt onModeChange, wird onSuccess dafür verwendet
+// (unproblematisch, solange onSuccess selbst keinen Sprung/Statuswechsel auslöst).
+function bindAuthForm(onSuccess, onModeChange) {
+  const redraw = onModeChange || onSuccess;
   document.getElementById("auth-tab-login")?.addEventListener("click", () => {
     customerAuthMode = "login";
-    rerender();
+    redraw();
   });
   document.getElementById("auth-tab-signup")?.addEventListener("click", () => {
     customerAuthMode = "signup";
-    rerender();
+    redraw();
   });
   document.getElementById("auth-forgot-link")?.addEventListener("click", () => {
     customerAuthMode = "forgot";
-    rerender();
+    redraw();
   });
   document.getElementById("auth-back-to-login")?.addEventListener("click", () => {
     customerAuthMode = "login";
-    rerender();
+    redraw();
   });
 
   bindPasswordEyeToggles(document);
@@ -716,7 +722,7 @@ function bindAuthForm(rerender) {
       }
       await loadCurrentProfile();
       renderNavUser();
-      rerender();
+      onSuccess();
     } catch (err) {
       const needsVerify = /bestätigen/i.test(err.message || "");
       errBox.innerHTML = `<div class="alert alert-error">${err.message || "Anmeldung fehlgeschlagen."}</div>${needsVerify ? `<div style="margin-top:8px;"><button type="button" class="link-danger" id="auth-resend-link" style="color:var(--gold-dark);">Bestätigungsmail erneut senden</button></div>` : ""}`;
@@ -798,7 +804,10 @@ async function renderCustomerBookingTab(profile) {
         <button type="button" class="link-danger" id="skip-login-btn" style="color:var(--gold-dark);">Stattdessen einen neuen Termin auswählen</button>
       </p>
     `;
-    bindAuthForm(() => { forceLoginPrompt = false; renderBooking(); });
+    bindAuthForm(
+      () => { forceLoginPrompt = false; renderBooking(); },
+      () => renderCustomerBookingTab(profile)
+    );
     document.getElementById("skip-login-btn").addEventListener("click", () => {
       forceLoginPrompt = false;
       renderCustomerBookingTab(profile);
