@@ -387,6 +387,42 @@ switch ($action) {
         $stmt->execute($params);
         friseur_json(['waitlist' => $stmt->fetchAll()]);
 
+    // ---------- Kundenmeinungen ----------
+
+    case 'reviews_list':
+        // Öffentlich lesbar (Startseite).
+        $rows = $pdo->query('SELECT id, first_name, body, created_at FROM reviews ORDER BY created_at DESC LIMIT 30')->fetchAll();
+        friseur_json(['reviews' => $rows]);
+
+    case 'review_create':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $me = friseur_require_login($pdo);
+        $in = friseur_body();
+        $body = trim((string) ($in['body'] ?? ''));
+        if ($body === '' || mb_strlen($body) < 5) {
+            friseur_json(['error' => 'Bitte eine Meinung mit mindestens 5 Zeichen eingeben.'], 400);
+        }
+        if (mb_strlen($body) > 1000) {
+            friseur_json(['error' => 'Bitte kürzer fassen (max. 1000 Zeichen).'], 400);
+        }
+        // Vorname aus dem hinterlegten Namen ableiten, damit niemand einen fremden
+        // Namen vortäuschen kann - echte Meinungen von echten angemeldeten Kund:innen.
+        $firstName = trim(explode(' ', (string) $me['display_name'])[0]);
+        $firstName = $firstName !== '' ? $firstName : $me['display_name'];
+        $ins = $pdo->prepare('INSERT INTO reviews (customer_id, first_name, body) VALUES (?, ?, ?)');
+        $ins->execute([$me['id'], $firstName, $body]);
+        friseur_json(['ok' => true, 'id' => (int) $pdo->lastInsertId()]);
+
+    case 'review_delete':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $me = friseur_require_login($pdo);
+        if ($me['role'] !== 'owner') friseur_json(['error' => 'Kein Zugriff.'], 403);
+        $in = friseur_body();
+        $id = (int) ($in['id'] ?? 0);
+        if ($id <= 0) friseur_json(['error' => 'Ungültige Anfrage.'], 400);
+        $pdo->prepare('DELETE FROM reviews WHERE id = ?')->execute([$id]);
+        friseur_json(['ok' => true]);
+
     // ---------- Released slots ----------
 
     case 'released_slots_list':

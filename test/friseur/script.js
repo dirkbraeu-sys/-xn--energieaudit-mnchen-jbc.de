@@ -363,6 +363,89 @@ async function dbFetchCustomerProfiles() {
     return profiles;
   } catch (e) { console.error(e); return []; }
 }
+
+/* ---------- Kundenmeinungen ---------- */
+async function dbFetchReviews() {
+  try {
+    const { reviews } = await apiGet("reviews_list");
+    return reviews;
+  } catch (e) { console.error(e); return []; }
+}
+async function dbCreateReview(body) {
+  try {
+    await api("review_create", { method: "POST", body: { body } });
+    return { error: null };
+  } catch (e) {
+    return { error: { message: e.message } };
+  }
+}
+async function dbDeleteReview(id) {
+  try { await api("review_delete", { method: "POST", body: { id } }); } catch (e) { /* ignorieren */ }
+}
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
+async function renderReviews() {
+  const root = document.getElementById("reviews-app");
+  if (!root) return;
+  const reviews = await dbFetchReviews();
+  const isOwner = currentProfile?.role === "owner";
+
+  root.innerHTML = `
+    ${currentProfile ? `
+      <form id="review-form" style="max-width:560px; margin:0 auto 32px;">
+        <div class="form-row">
+          <label for="review-body">Ihre Meinung</label>
+          <textarea id="review-body" rows="3" maxlength="1000" spellcheck="true" lang="de" placeholder="Wie war Ihr Besuch bei uns?" required></textarea>
+        </div>
+        <div id="review-error"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Meinung veröffentlichen</button>
+        </div>
+      </form>
+    ` : `<p class="hint" style="text-align:center; max-width:480px; margin:0 auto 28px;">Nur angemeldete Kund:innen können eine Meinung hinterlassen. <a href="#termin">Jetzt anmelden</a></p>`}
+    <div class="reviews-grid" id="reviews-list">
+      ${reviews.length === 0
+        ? `<p class="hint" style="text-align:center; grid-column:1/-1;">Noch keine Kundenmeinungen vorhanden.</p>`
+        : reviews.map(r => `
+          <div class="review-card">
+            <p class="review-body">„${escapeHtml(r.body)}"</p>
+            <div class="review-foot">
+              <span class="review-author">– ${escapeHtml(r.first_name)}</span>
+              ${isOwner ? `<button type="button" class="link-danger" data-del-review="${r.id}">löschen</button>` : ""}
+            </div>
+          </div>
+        `).join("")}
+    </div>
+  `;
+
+  document.getElementById("review-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const textarea = document.getElementById("review-body");
+    const errBox = document.getElementById("review-error");
+    const btn = e.target.querySelector("button[type=submit]");
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ Wird gespeichert …";
+    const { error } = await dbCreateReview(textarea.value.trim());
+    btn.disabled = false;
+    btn.textContent = origText;
+    if (error) {
+      errBox.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
+      return;
+    }
+    renderReviews();
+  });
+
+  root.querySelectorAll("[data-del-review]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Diese Kundenmeinung wirklich löschen?")) return;
+      await dbDeleteReview(btn.dataset.delReview);
+      renderReviews();
+    });
+  });
+}
 /* ---------- Freie Zeitfenster berechnen (Kundenseite) ---------- */
 async function computeFreeSlotsForStaff(dateStr, duration, staffId) {
   const d = new Date(dateStr + "T00:00:00");
@@ -1185,6 +1268,7 @@ function renderNavUser() {
       renderBooking();
     });
   }
+  renderReviews();
 }
 
 /* ===========================================================
@@ -1868,6 +1952,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   handleRoute();
   renderNavUser();
   renderBooking();
+  renderReviews();
 
   document.getElementById("nav-toggle")?.addEventListener("click", () => {
     document.getElementById("nav-links").classList.toggle("open");

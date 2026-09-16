@@ -105,6 +105,16 @@ function friseur_ensure_schema(PDO $pdo): void
             KEY idx_date_staff (date, staff_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS reviews (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            customer_id INT UNSIGNED NOT NULL,
+            first_name VARCHAR(100) NOT NULL,
+            body TEXT NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_customer (customer_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
 
     // Demo-Zugänge einmalig anlegen (entspricht den Angaben aus der README).
     $seed = [
