@@ -225,29 +225,33 @@ switch ($action) {
         $where = [];
         $params = [];
         if ($me['role'] === 'customer') {
-            $where[] = 'customer_id = ?';
+            $where[] = 'bookings.customer_id = ?';
             $params[] = $me['id'];
         } elseif ($me['role'] === 'staff') {
-            $where[] = 'staff_id = ?';
+            $where[] = 'bookings.staff_id = ?';
             $params[] = $me['staff_id'];
         } // owner sieht alles
         if (!empty($_GET['date'])) {
-            $where[] = 'date = ?';
+            $where[] = 'bookings.date = ?';
             $params[] = (string) $_GET['date'];
         }
         if (!empty($_GET['from'])) {
-            $where[] = 'date >= ?';
+            $where[] = 'bookings.date >= ?';
             $params[] = (string) $_GET['from'];
         }
         if (!empty($_GET['staff_id']) && $me['role'] === 'owner') {
-            $where[] = 'staff_id = ?';
+            $where[] = 'bookings.staff_id = ?';
             $params[] = (string) $_GET['staff_id'];
         }
         if (!empty($_GET['customer_id']) && $me['role'] === 'owner') {
-            $where[] = 'customer_id = ?';
+            $where[] = 'bookings.customer_id = ?';
             $params[] = (int) $_GET['customer_id'];
         }
-        $sql = 'SELECT * FROM bookings' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY date, start_time';
+        // Notiz zur Kundschaft (fuers Team) wird direkt mitgeliefert, damit keine
+        // zweite Anfrage noetig ist, um sie in der Terminliste anzuzeigen.
+        $sql = 'SELECT bookings.*, profiles.notes AS customer_notes FROM bookings
+                LEFT JOIN profiles ON profiles.id = bookings.customer_id'
+            . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY bookings.date, bookings.start_time';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         friseur_json(['bookings' => $stmt->fetchAll()]);
@@ -255,7 +259,11 @@ switch ($action) {
     case 'booking_get':
         $me = friseur_require_login($pdo);
         $id = (int) ($_GET['id'] ?? 0);
-        $stmt = $pdo->prepare('SELECT * FROM bookings WHERE id = ?');
+        $stmt = $pdo->prepare('
+            SELECT bookings.*, profiles.notes AS customer_notes FROM bookings
+            LEFT JOIN profiles ON profiles.id = bookings.customer_id
+            WHERE bookings.id = ?
+        ');
         $stmt->execute([$id]);
         $row = $stmt->fetch();
         if ($row && $me['role'] === 'customer' && (int) $row['customer_id'] !== (int) $me['id']) {
@@ -265,6 +273,19 @@ switch ($action) {
             friseur_json(['error' => 'Kein Zugriff.'], 403);
         }
         friseur_json(['booking' => $row]);
+
+    case 'customer_note_set':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $me = friseur_require_login($pdo);
+        if (!in_array($me['role'], ['staff', 'owner'], true)) friseur_json(['error' => 'Kein Zugriff.'], 403);
+        $in = friseur_body();
+        $customerId = (int) ($in['customer_id'] ?? 0);
+        $note = trim((string) ($in['note'] ?? ''));
+        if ($customerId <= 0) friseur_json(['error' => 'Ungültige Anfrage.'], 400);
+        if (mb_strlen($note) > 2000) friseur_json(['error' => 'Bitte kürzer fassen (max. 2000 Zeichen).'], 400);
+        $pdo->prepare('UPDATE profiles SET notes = ? WHERE id = ? AND role = "customer"')
+            ->execute([$note !== '' ? $note : null, $customerId]);
+        friseur_json(['ok' => true]);
 
     case 'booking_create':
         if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);

@@ -61,6 +61,7 @@ function friseur_ensure_schema(PDO $pdo): void
     friseur_ensure_column($pdo, 'profiles', 'reset_token', "reset_token VARCHAR(64) NULL");
     friseur_ensure_column($pdo, 'profiles', 'reset_expires', "reset_expires DATETIME NULL");
     friseur_ensure_column($pdo, 'profiles', 'phone', "phone VARCHAR(30) NULL");
+    friseur_ensure_column($pdo, 'profiles', 'notes', "notes TEXT NULL");
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS bookings (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

@@ -279,7 +279,8 @@ function mapBooking(row) {
     staffId: row.staff_id,
     staff: row.staff_name,
     manual: row.manual,
-    customerId: row.customer_id
+    customerId: row.customer_id,
+    customerNotes: row.customer_notes || ""
   };
 }
 
@@ -1662,12 +1663,16 @@ async function renderAdminBookings(lockedStaffId) {
       ${dayBookings.length === 0
         ? `<li class="hint" style="background:none;">An diesem Tag sind keine Termine gebucht.</li>`
         : dayBookings.map(b => `
-          <li>
-            <span>${b.manual ? "📞 " : ""}<strong>${b.start}–${b.end} Uhr</strong> · ${b.service} · Kund:in: ${b.user}${isOwnerView ? ` · bei ${b.staff || "?"}` : ""}</span>
-            <span style="display:flex; gap:10px; align-items:center;">
-              <button class="link-danger" style="color:var(--gold-dark);" data-edit-booking="${b.id}">bearbeiten</button>
-              <button class="link-danger" data-admin-cancel="${b.id}">stornieren</button>
-            </span>
+          <li style="flex-direction:column; align-items:stretch; gap:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+              <span>${b.manual ? "📞 " : ""}<strong>${b.start}–${b.end} Uhr</strong> · ${b.service} · Kund:in: ${b.user}${isOwnerView ? ` · bei ${b.staff || "?"}` : ""}</span>
+              <span style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <button class="link-danger" style="color:var(--gold-dark);" data-edit-booking="${b.id}">bearbeiten</button>
+                <button class="link-danger" data-admin-cancel="${b.id}">stornieren</button>
+                ${b.customerId ? `<button class="link-danger" style="color:var(--gold-dark);" data-note-customer="${b.customerId}" data-note-name="${escapeHtml(b.user)}" data-note-current="${escapeHtml(b.customerNotes)}">${b.customerNotes ? "📝 Notiz" : "+ Notiz"}</button>` : ""}
+              </span>
+            </div>
+            ${b.customerNotes ? `<div class="hint" style="background:none; padding:0; font-size:.82rem;">📝 ${escapeHtml(b.customerNotes)}</div>` : ""}
           </li>
         `).join("")}
     </ul>
@@ -1775,6 +1780,12 @@ async function renderAdminBookings(lockedStaffId) {
       if (editingBookingId === btn.dataset.adminCancel) editingBookingId = null;
       await dbDeleteBooking(btn.dataset.adminCancel);
       renderAdminBookings(lockedStaffId);
+    });
+  });
+
+  content.querySelectorAll("[data-note-customer]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      openCustomerNoteOverlay(btn.dataset.noteCustomer, btn.dataset.noteName, btn.dataset.noteCurrent, () => renderAdminBookings(lockedStaffId));
     });
   });
 
@@ -2229,6 +2240,51 @@ function openChangePasswordOverlay() {
       <div class="form-actions"><button type="button" class="btn btn-primary" id="changepw-close">Schließen</button></div>
     `;
     overlay.querySelector("#changepw-close").addEventListener("click", () => overlay.remove());
+  });
+}
+
+// Notizfeld fürs Salon-Team: interne Anmerkungen zu einer Kundin/einem Kunden
+// (z. B. Allergien, Vorlieben, Absprachen) - sichtbar für Inhaber:in und
+// Mitarbeiter:innen bei den Terminen dieser Person, persistiert in profiles.notes.
+function openCustomerNoteOverlay(customerId, customerName, currentNote, onSaved) {
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed; inset:0; z-index:9999; background:rgba(42,36,32,.55); display:flex; align-items:center; justify-content:center; padding:20px;";
+  overlay.innerHTML = `
+    <div style="background:#fff; border-radius:14px; padding:28px; max-width:420px; width:100%; font-family:sans-serif; box-shadow:0 20px 50px rgba(0,0,0,.3);">
+      <h3 style="margin-top:0; font-family:Georgia, serif;">Notiz zu ${escapeHtml(customerName)}</h3>
+      <p class="hint" style="margin-top:-4px;">Nur fürs Salon-Team sichtbar, z. B. Allergien, Vorlieben oder Absprachen.</p>
+      <div id="note-error"></div>
+      <form id="note-form">
+        <div class="form-row">
+          <textarea id="note-body" rows="4" maxlength="2000" placeholder="z. B. mag es kurz auf den Ohren, verträgt kein Ammoniak …">${escapeHtml(currentNote)}</textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Speichern</button>
+          <button type="button" class="btn btn-light" id="note-cancel">Abbrechen</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#note-cancel").addEventListener("click", () => overlay.remove());
+  overlay.querySelector("#note-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const note = overlay.querySelector("#note-body").value.trim();
+    const errBox = overlay.querySelector("#note-error");
+    const btn = e.target.querySelector("button[type=submit]");
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ Wird gespeichert …";
+    try {
+      await api("customer_note_set", { method: "POST", body: { customer_id: customerId, note } });
+    } catch (err) {
+      errBox.innerHTML = `<div class="alert alert-error">${err.message || "Notiz konnte nicht gespeichert werden."}</div>`;
+      btn.disabled = false;
+      btn.textContent = origText;
+      return;
+    }
+    overlay.remove();
+    onSaved?.();
   });
 }
 
