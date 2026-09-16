@@ -20,8 +20,12 @@ switch ($action) {
         $password = (string) ($in['password'] ?? '');
         $displayName = trim((string) ($in['display_name'] ?? $identifier));
         $displayName = $displayName !== '' ? $displayName : $identifier;
+        $phone = trim((string) ($in['phone'] ?? ''));
         if (!filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
             friseur_json(['error' => 'Bitte eine gültige E-Mail-Adresse angeben.'], 400);
+        }
+        if ($phone === '' || !preg_match('/^[0-9+\/\s()-]{5,30}$/', $phone)) {
+            friseur_json(['error' => 'Bitte eine gültige Telefonnummer angeben.'], 400);
         }
         if (!friseur_valid_password($password)) {
             friseur_json(['error' => FRISEUR_PASSWORT_HINWEIS], 400);
@@ -38,11 +42,11 @@ switch ($action) {
                 friseur_json(['error' => 'Für diese Adresse besteht bereits ein Konto. Bitte melden Sie sich an.'], 400);
             }
             // Registrierung noch nicht bestätigt: neuen Token vergeben und erneut zusenden.
-            $upd = $pdo->prepare('UPDATE profiles SET password_hash = ?, display_name = ?, verification_token = ?, verification_expires = ? WHERE id = ?');
-            $upd->execute([$passwordHash, $displayName, $token, $expires, $existing['id']]);
+            $upd = $pdo->prepare('UPDATE profiles SET password_hash = ?, display_name = ?, phone = ?, verification_token = ?, verification_expires = ? WHERE id = ?');
+            $upd->execute([$passwordHash, $displayName, $phone, $token, $expires, $existing['id']]);
         } else {
-            $ins = $pdo->prepare('INSERT INTO profiles (identifier, password_hash, role, display_name, verified, verification_token, verification_expires) VALUES (?, ?, "customer", ?, 0, ?, ?)');
-            $ins->execute([$identifier, $passwordHash, $displayName, $token, $expires]);
+            $ins = $pdo->prepare('INSERT INTO profiles (identifier, password_hash, role, display_name, phone, verified, verification_token, verification_expires) VALUES (?, ?, "customer", ?, ?, 0, ?, ?)');
+            $ins->execute([$identifier, $passwordHash, $displayName, $phone, $token, $expires]);
         }
 
         friseur_send_verification_mail($identifier, $displayName, $token);
@@ -161,7 +165,7 @@ switch ($action) {
     case 'profiles_list':
         $me = friseur_require_login($pdo);
         if ($me['role'] !== 'owner') friseur_json(['error' => 'Kein Zugriff.'], 403);
-        $rows = $pdo->query("SELECT id, identifier, role, staff_id, display_name, created_at FROM profiles WHERE role = 'customer' ORDER BY created_at DESC")->fetchAll();
+        $rows = $pdo->query("SELECT id, identifier, role, staff_id, display_name, phone, created_at FROM profiles WHERE role = 'customer' ORDER BY created_at DESC")->fetchAll();
         friseur_json(['profiles' => $rows]);
 
     // ---------- Bookings ----------

@@ -135,9 +135,9 @@ async function loadCurrentProfile() {
   }
 }
 
-async function signUpCustomer(email, password, displayName) {
+async function signUpCustomer(email, password, displayName, phone) {
   try {
-    const { profile } = await api("signup", { method: "POST", body: { email, password, display_name: displayName } });
+    const { profile } = await api("signup", { method: "POST", body: { email, password, display_name: displayName, phone } });
     // Backend legt nach der Registrierung noch keine Session an, solange die
     // E-Mail-Adresse nicht über den zugesendeten Link bestätigt wurde.
     currentProfile = profile ? { id: profile.id, email: profile.identifier, role: profile.role, staffId: profile.staff_id, name: profile.display_name } : null;
@@ -599,6 +599,12 @@ function authFormHTML(embedded) {
           <label for="auth-email">${isSignup ? "E-Mail-Adresse" : "E-Mail-Adresse oder Benutzername"}</label>
           <input id="auth-email" type="${isSignup ? "email" : "text"}" autocomplete="${isSignup ? "email" : "username"}" placeholder="${isSignup ? "ihre@email.de" : "ihre@email.de oder Benutzername"}" required>
         </div>
+        ${isSignup ? `
+          <div class="form-row">
+            <label for="auth-phone">Telefonnummer</label>
+            <input id="auth-phone" type="tel" autocomplete="tel" placeholder="z. B. 0170 1234567" required>
+          </div>
+        ` : ""}
         <div class="form-row">
           <label for="auth-pass">Passwort</label>
           <div class="pw-field">
@@ -693,7 +699,8 @@ function bindAuthForm(rerender) {
     try {
       if (customerAuthMode === "signup") {
         const name = document.getElementById("auth-name").value.trim();
-        const { data, error } = await signUpCustomer(email, pass, name);
+        const phone = document.getElementById("auth-phone").value.trim();
+        const { data, error } = await signUpCustomer(email, pass, name, phone);
         if (error) throw error;
         if (!data.session) {
           saveBookingDraft();
@@ -1627,7 +1634,7 @@ async function renderAdminCustomers() {
         <div class="customer-card">
           <div class="customer-card-head">
             <span>
-              <strong>${p.display_name}</strong> · ${p.id in bookingsByCustomer ? "" : ""}
+              <strong>${p.display_name}</strong> · ${p.identifier}${p.phone ? ` · 📞 ${p.phone}` : ""} ·
               <strong>${bookings.length}</strong> Termin${bookings.length === 1 ? "" : "e"}
             </span>
             <span style="display:flex; gap:14px; align-items:center;">

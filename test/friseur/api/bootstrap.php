@@ -60,6 +60,7 @@ function friseur_ensure_schema(PDO $pdo): void
     friseur_ensure_column($pdo, 'profiles', 'verification_expires', "verification_expires DATETIME NULL");
     friseur_ensure_column($pdo, 'profiles', 'reset_token', "reset_token VARCHAR(64) NULL");
     friseur_ensure_column($pdo, 'profiles', 'reset_expires', "reset_expires DATETIME NULL");
+    friseur_ensure_column($pdo, 'profiles', 'phone', "phone VARCHAR(30) NULL");
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS bookings (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -145,7 +146,7 @@ function friseur_current_profile(PDO $pdo): ?array
     if (empty($_SESSION['profile_id'])) {
         return null;
     }
-    $stmt = $pdo->prepare('SELECT id, identifier, role, staff_id, display_name FROM profiles WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, identifier, role, staff_id, display_name, phone FROM profiles WHERE id = ?');
     $stmt->execute([$_SESSION['profile_id']]);
     $row = $stmt->fetch();
     return $row ?: null;
