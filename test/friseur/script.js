@@ -1411,6 +1411,7 @@ function renderSalonLogin(root) {
           <button type="button" class="btn btn-light" id="salon-back-to-login">Zurück zur Anmeldung</button>
         </div>
       </form>
+      <p class="hint" style="text-align:center; margin-top:16px;"><a href="#datenschutz">Datenschutzerklärung</a></p>
     `;
     document.getElementById("salon-back-to-login").addEventListener("click", () => {
       salonAuthMode = "login";
@@ -1459,6 +1460,7 @@ function renderSalonLogin(root) {
       </div>
       <p class="hint" style="text-align:right; margin-top:10px;"><button type="button" class="link-danger" id="salon-forgot-link" style="color:var(--gold-dark);">Passwort vergessen?</button></p>
     </form>
+    <p class="hint" style="text-align:center; margin-top:16px;"><a href="#datenschutz">Datenschutzerklärung</a></p>
   `;
   bindPasswordEyeToggles(root);
   document.getElementById("salon-forgot-link").addEventListener("click", () => {
@@ -1495,7 +1497,8 @@ async function renderOwnerPanel(root) {
     <p class="hint" style="text-align:right;">
       Angemeldet als Inhaber:in ·
       <button class="link-danger" style="color:var(--gold-dark);" id="admin-changepw-btn">Passwort ändern</button> ·
-      <button class="link-danger" id="admin-logout-btn">abmelden</button>
+      <button class="link-danger" id="admin-logout-btn">abmelden</button> ·
+      <a href="#datenschutz" style="font-size:.85rem;">Datenschutzerklärung</a>
     </p>
     <div class="steps">
       <span class="step-pill ${adminView === "termine" ? "active" : ""}" id="tab-termine" style="cursor:pointer;">Tagesübersicht</span>
@@ -1528,7 +1531,8 @@ async function renderStaffPanel(root) {
     <p class="hint" style="text-align:right;">
       Angemeldet als <strong>${currentProfile.name}</strong> ·
       <button class="link-danger" style="color:var(--gold-dark);" id="staff-changepw-btn">Passwort ändern</button> ·
-      <button class="link-danger" id="staff-logout-btn">abmelden</button>
+      <button class="link-danger" id="staff-logout-btn">abmelden</button> ·
+      <a href="#datenschutz" style="font-size:.85rem;">Datenschutzerklärung</a>
     </p>
     <div class="steps">
       <span class="step-pill ${staffView === "termine" ? "active" : ""}" id="stab-termine" style="cursor:pointer;">Meine Termine</span>
