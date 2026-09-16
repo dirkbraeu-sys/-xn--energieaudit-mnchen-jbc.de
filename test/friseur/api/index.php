@@ -160,6 +160,18 @@ switch ($action) {
     case 'me':
         friseur_json(['profile' => friseur_current_profile($pdo)]);
 
+    case 'update_phone':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $me = friseur_require_login($pdo);
+        $in = friseur_body();
+        $phone = trim((string) ($in['phone'] ?? ''));
+        if ($phone === '' || !preg_match('/^[0-9+\/\s()-]{5,30}$/', $phone)) {
+            friseur_json(['error' => 'Bitte eine gültige Telefonnummer angeben.'], 400);
+        }
+        $upd = $pdo->prepare('UPDATE profiles SET phone = ? WHERE id = ?');
+        $upd->execute([$phone, $me['id']]);
+        friseur_json(['profile' => friseur_current_profile($pdo)]);
+
     // ---------- Profiles (nur Inhaber) ----------
 
     case 'profiles_list':

@@ -126,7 +126,8 @@ async function loadCurrentProfile() {
       email: profile.identifier,
       role: profile.role,
       staffId: profile.staff_id,
-      name: profile.display_name
+      name: profile.display_name,
+      phone: profile.phone || ""
     };
     return currentProfile;
   } catch (e) {
@@ -140,7 +141,7 @@ async function signUpCustomer(email, password, displayName, phone) {
     const { profile } = await api("signup", { method: "POST", body: { email, password, display_name: displayName, phone } });
     // Backend legt nach der Registrierung noch keine Session an, solange die
     // E-Mail-Adresse nicht über den zugesendeten Link bestätigt wurde.
-    currentProfile = profile ? { id: profile.id, email: profile.identifier, role: profile.role, staffId: profile.staff_id, name: profile.display_name } : null;
+    currentProfile = profile ? { id: profile.id, email: profile.identifier, role: profile.role, staffId: profile.staff_id, name: profile.display_name, phone: profile.phone || "" } : null;
     return { data: { profile: currentProfile, session: !!profile }, error: null };
   } catch (e) {
     return { data: null, error: { message: e.message } };
@@ -149,7 +150,7 @@ async function signUpCustomer(email, password, displayName, phone) {
 async function signInEmail(email, password) {
   try {
     const { profile } = await api("signin", { method: "POST", body: { email, password } });
-    currentProfile = profile ? { id: profile.id, email: profile.identifier, role: profile.role, staffId: profile.staff_id, name: profile.display_name } : null;
+    currentProfile = profile ? { id: profile.id, email: profile.identifier, role: profile.role, staffId: profile.staff_id, name: profile.display_name, phone: profile.phone || "" } : null;
     return { data: { profile: currentProfile }, error: null };
   } catch (e) {
     return { data: null, error: { message: e.message } };
@@ -158,6 +159,15 @@ async function signInEmail(email, password) {
 async function signOutUser() {
   try { await api("signout", { method: "POST", body: {} }); } catch (e) {}
   currentProfile = null;
+}
+async function updateCustomerPhone(phone) {
+  try {
+    const { profile } = await api("update_phone", { method: "POST", body: { phone } });
+    if (currentProfile) currentProfile.phone = profile.phone || "";
+    return { data: { profile: currentProfile }, error: null };
+  } catch (e) {
+    return { data: null, error: { message: e.message } };
+  }
 }
 
 // Gleiche Mindestanforderungen wie im Kundenlogin auf braeu-ing.de: mind. 8 Zeichen,
@@ -510,6 +520,7 @@ function closeMobileNav() {
    =========================================================== */
 const bookingState = { serviceId: null, date: null, start: null, staffId: null };
 let customerView = "buchen"; // "buchen" | "meine"
+let editingCustomerPhone = false; // steuert die Bearbeiten-Ansicht der Telefonnummer unter "Meine Termine"
 let customerAuthMode = "login"; // "login" | "signup"
 // Wird über den "Anmelden"-Button im Header gesetzt: zeigt sofort das Login-
 // Formular, statt erst wieder durch die Terminauswahl zu führen, damit
@@ -1053,6 +1064,23 @@ async function renderCustomerAppointmentsTab(profile) {
   const mine = await dbFetchBookingsForCustomer(profile.id);
 
   content.innerHTML = `
+    <div class="form-row" id="phone-row" style="margin-bottom:20px;">
+      <label>Telefonnummer</label>
+      ${editingCustomerPhone ? `
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <input id="phone-edit-input" type="tel" value="${profile.phone || ""}" placeholder="z. B. 0170 1234567" style="max-width:260px;">
+          <button type="button" class="btn btn-primary" id="phone-save-btn">Speichern</button>
+          <button type="button" class="btn btn-light" id="phone-cancel-btn">Abbrechen</button>
+        </div>
+        <div id="phone-edit-error"></div>
+      ` : `
+        <div style="display:flex; gap:10px; align-items:center;">
+          <span>${profile.phone ? `📞 ${profile.phone}` : `<span class="hint" style="background:none; padding:0;">Keine Telefonnummer hinterlegt.</span>`}</span>
+          <button type="button" class="link-danger" style="color:var(--gold-dark);" id="phone-edit-btn">bearbeiten</button>
+        </div>
+      `}
+    </div>
+
     <h3 style="margin-top:0;">${mine.length === 0 ? "Keine gebuchten Termine" : `${mine.length} gebuchte${mine.length === 1 ? "r Termin" : " Termine"}`}</h3>
     <ul class="appt-list" id="my-appts">
       ${mine.length === 0
@@ -1072,6 +1100,29 @@ async function renderCustomerAppointmentsTab(profile) {
       <button type="button" class="btn btn-light" id="goto-booking-btn">+ Neuen Termin buchen</button>
     </div>
   `;
+
+  document.getElementById("phone-edit-btn")?.addEventListener("click", () => {
+    editingCustomerPhone = true;
+    renderCustomerAppointmentsTab(profile);
+  });
+  document.getElementById("phone-cancel-btn")?.addEventListener("click", () => {
+    editingCustomerPhone = false;
+    renderCustomerAppointmentsTab(profile);
+  });
+  document.getElementById("phone-save-btn")?.addEventListener("click", async () => {
+    const phone = document.getElementById("phone-edit-input").value.trim();
+    const errBox = document.getElementById("phone-edit-error");
+    const btn = document.getElementById("phone-save-btn");
+    btn.disabled = true;
+    const { error } = await updateCustomerPhone(phone);
+    btn.disabled = false;
+    if (error) {
+      errBox.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
+      return;
+    }
+    editingCustomerPhone = false;
+    renderCustomerAppointmentsTab(profile);
+  });
 
   document.getElementById("goto-booking-btn").addEventListener("click", () => {
     customerView = "buchen";
