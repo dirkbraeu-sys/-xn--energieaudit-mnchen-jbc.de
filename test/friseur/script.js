@@ -32,6 +32,15 @@ function apiGet(action, params = {}) {
     });
 }
 
+// Cookie-freier Seitenaufruf-Zähler für die Besucherstatistik (Inhaber-Panel).
+// Läuft nur einmal pro Seitenaufruf, ohne Cookie/localStorage; die Server-
+// seite erkennt "eindeutige Besucher:innen" über einen taeglich rotierenden
+// Hash aus IP+Browser (siehe friseur_visitor_hash in bootstrap.php).
+function trackPageView() {
+  api("track_view", { method: "POST", body: { path: location.pathname, referrer: document.referrer || "" } })
+    .catch(() => { /* Statistik ist nie kritisch für die Funktion der Seite */ });
+}
+
 /* ---------- Konfiguration ---------- */
 
 // Mitarbeiter:innen für Kalender & Terminplanung
@@ -1492,6 +1501,7 @@ async function renderOwnerPanel(root) {
       <span class="step-pill ${adminView === "termine" ? "active" : ""}" id="tab-termine" style="cursor:pointer;">Tagesübersicht</span>
       <span class="step-pill ${adminView === "freigabe" ? "active" : ""}" id="tab-freigabe" style="cursor:pointer;">Zeiten freigeben</span>
       <span class="step-pill ${adminView === "kunden" ? "active" : ""}" id="tab-kunden" style="cursor:pointer;">Kund:innen</span>
+      <span class="step-pill ${adminView === "statistik" ? "active" : ""}" id="tab-statistik" style="cursor:pointer;">Statistik</span>
     </div>
     <div id="admin-tab-content"><p class="hint">Lädt …</p></div>
   `;
@@ -1504,9 +1514,11 @@ async function renderOwnerPanel(root) {
   document.getElementById("tab-termine").addEventListener("click", () => { adminView = "termine"; renderAdmin(); });
   document.getElementById("tab-freigabe").addEventListener("click", () => { adminView = "freigabe"; renderAdmin(); });
   document.getElementById("tab-kunden").addEventListener("click", () => { adminView = "kunden"; renderAdmin(); });
+  document.getElementById("tab-statistik").addEventListener("click", () => { adminView = "statistik"; renderAdmin(); });
 
   if (adminView === "termine") await renderAdminBookings(null);
   else if (adminView === "freigabe") await renderAdminRelease(null);
+  else if (adminView === "statistik") await renderAdminStats();
   else await renderAdminCustomers();
 }
 
@@ -1941,6 +1953,77 @@ async function renderAdminCustomers() {
   });
 }
 
+// Cookie-freie Besucherstatistik: Zahlen kommen aus page_views (siehe
+// bootstrap.php / trackPageView) - "eindeutige Besucher:innen" basiert auf
+// einem taeglich rotierenden Hash aus IP+Browser, nie auf einem Cookie.
+async function renderAdminStats() {
+  const content = document.getElementById("admin-tab-content");
+  content.innerHTML = `<p class="hint">Lädt …</p>`;
+
+  let stats;
+  try {
+    stats = await api("stats_summary", {});
+  } catch (e) {
+    content.innerHTML = `<div class="alert alert-error">Statistik konnte nicht geladen werden: ${e.message}</div>`;
+    return;
+  }
+
+  const maxViews = Math.max(1, ...stats.daily.map(d => d.views));
+
+  content.innerHTML = `
+    <div class="alert alert-info" style="margin-bottom:20px;">
+      Cookie-freie Besucherstatistik: "Eindeutige Besucher:innen" basiert auf einem
+      täglich neu berechneten, anonymen Kennwert aus IP-Adresse und Browser – ohne
+      Cookies oder Speicherung im Browser, und ohne dass dieselbe Person über mehrere
+      Tage hinweg wiedererkennbar wäre.
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin-bottom:28px;">
+      ${[
+        ["Heute", stats.today],
+        ["Letzte 7 Tage", stats.last7],
+        ["Letzte 30 Tage", stats.last30],
+      ].map(([label, s]) => `
+        <div class="customer-card" style="text-align:center;">
+          <div style="font-size:.8rem; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em;">${label}</div>
+          <div style="font-size:1.8rem; font-family:var(--serif); margin:6px 0 2px;">${s.views}</div>
+          <div style="font-size:.82rem; color:var(--ink-soft);">Aufrufe · ${s.uniques} eindeutige Besucher:innen</div>
+        </div>
+      `).join("")}
+    </div>
+
+    <h3>Letzte 14 Tage</h3>
+    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:28px;">
+      ${stats.daily.length === 0
+        ? `<p class="hint">Noch keine Besuche aufgezeichnet.</p>`
+        : stats.daily.map(d => `
+          <div style="display:flex; align-items:center; gap:10px; font-size:.85rem;">
+            <span style="width:90px; flex:0 0 auto; color:var(--ink-soft);">${new Date(d.day + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" })}</span>
+            <div style="flex:1; background:var(--paper-alt); border-radius:6px; overflow:hidden; height:20px;">
+              <div style="width:${Math.round((d.views / maxViews) * 100)}%; background:var(--gold); height:100%;"></div>
+            </div>
+            <span style="width:110px; flex:0 0 auto; text-align:right;">${d.views} Aufrufe · ${d.uniques} eind.</span>
+          </div>
+        `).join("")}
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:24px;">
+      <div>
+        <h3>Meistbesuchte Seiten <span class="hint" style="background:none; padding:0; font-weight:400;">(30 Tage)</span></h3>
+        ${stats.top_pages.length === 0
+          ? `<p class="hint">Keine Daten.</p>`
+          : `<ul class="appt-list">${stats.top_pages.map(p => `<li><span>${escapeHtml(p.path)}</span><span>${p.c}</span></li>`).join("")}</ul>`}
+      </div>
+      <div>
+        <h3>Woher Besucher:innen kommen <span class="hint" style="background:none; padding:0; font-weight:400;">(30 Tage)</span></h3>
+        ${stats.referrers.length === 0
+          ? `<p class="hint">Bisher nur direkte Aufrufe oder Aufrufe ohne erkennbaren Verweis.</p>`
+          : `<ul class="appt-list">${stats.referrers.map(r => `<li><span>${escapeHtml(r.referrer)}</span><span>${r.c}</span></li>`).join("")}</ul>`}
+      </div>
+    </div>
+  `;
+}
+
 /* ===========================================================
    E-Mail-Bestätigung (Link aus der Registrierungs-Mail)
    =========================================================== */
@@ -2143,6 +2226,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderNavUser();
   renderBooking();
   renderReviews();
+  // Team/Inhaber-eigene Aufrufe nicht mitzählen, damit die Statistik echte
+  // Besucher:innen zeigt statt der eigenen Test- und Verwaltungsklicks.
+  if (!currentProfile || currentProfile.role === "customer") trackPageView();
 
   document.getElementById("nav-toggle")?.addEventListener("click", () => {
     document.getElementById("nav-links").classList.toggle("open");

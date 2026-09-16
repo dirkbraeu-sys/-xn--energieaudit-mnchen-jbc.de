@@ -413,6 +413,68 @@ switch ($action) {
         $stmt->execute($params);
         friseur_json(['waitlist' => $stmt->fetchAll()]);
 
+    // ---------- Besucherstatistik (cookie-frei) ----------
+
+    case 'track_view':
+        if ($method !== 'POST') friseur_json(['error' => 'Methode nicht erlaubt.'], 405);
+        $in = friseur_body();
+        $path = mb_substr(trim((string) ($in['path'] ?? '/')), 0, 255);
+        $referrer = trim((string) ($in['referrer'] ?? ''));
+        // Eigene Seite und leere Werte nicht als "Verweis" zählen.
+        if ($referrer !== '' && stripos($referrer, $_SERVER['HTTP_HOST'] ?? '') !== false) {
+            $referrer = '';
+        }
+        $referrer = $referrer !== '' ? mb_substr($referrer, 0, 255) : null;
+        $pdo->prepare('INSERT INTO page_views (path, referrer, visitor_hash) VALUES (?, ?, ?)')
+            ->execute([$path, $referrer, friseur_visitor_hash()]);
+        friseur_json(['ok' => true]);
+
+    case 'stats_summary':
+        $me = friseur_require_login($pdo);
+        if ($me['role'] !== 'owner') friseur_json(['error' => 'Kein Zugriff.'], 403);
+
+        $totals = function (string $interval) use ($pdo): array {
+            $stmt = $pdo->prepare("SELECT COUNT(*) AS views, COUNT(DISTINCT visitor_hash) AS uniques FROM page_views WHERE created_at >= NOW() - INTERVAL {$interval}");
+            $stmt->execute();
+            $row = $stmt->fetch();
+            return ['views' => (int) $row['views'], 'uniques' => (int) $row['uniques']];
+        };
+
+        $daily = $pdo->query("
+            SELECT DATE(created_at) AS day, COUNT(*) AS views, COUNT(DISTINCT visitor_hash) AS uniques
+            FROM page_views
+            WHERE created_at >= NOW() - INTERVAL 14 DAY
+            GROUP BY DATE(created_at)
+            ORDER BY day DESC
+        ")->fetchAll();
+
+        $referrers = $pdo->query("
+            SELECT referrer, COUNT(*) AS c
+            FROM page_views
+            WHERE referrer IS NOT NULL AND referrer != '' AND created_at >= NOW() - INTERVAL 30 DAY
+            GROUP BY referrer
+            ORDER BY c DESC
+            LIMIT 10
+        ")->fetchAll();
+
+        $topPages = $pdo->query("
+            SELECT path, COUNT(*) AS c
+            FROM page_views
+            WHERE created_at >= NOW() - INTERVAL 30 DAY
+            GROUP BY path
+            ORDER BY c DESC
+            LIMIT 10
+        ")->fetchAll();
+
+        friseur_json([
+            'today' => $totals('1 DAY'),
+            'last7' => $totals('7 DAY'),
+            'last30' => $totals('30 DAY'),
+            'daily' => $daily,
+            'referrers' => $referrers,
+            'top_pages' => $topPages,
+        ]);
+
     // ---------- Kundenmeinungen ----------
 
     case 'reviews_list':

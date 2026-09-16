@@ -125,6 +125,17 @@ function friseur_ensure_schema(PDO $pdo): void
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS page_views (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            path VARCHAR(255) NOT NULL,
+            referrer VARCHAR(255) NULL,
+            visitor_hash CHAR(64) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_created (created_at),
+            KEY idx_visitor (visitor_hash)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
 
     // Demo-Zugänge einmalig anlegen (entspricht den Angaben aus der README).
     $seed = [
@@ -224,6 +235,20 @@ function friseur_register_login_success(PDO $pdo, string $identifier): void
     if (random_int(1, 50) === 1) {
         $pdo->exec("DELETE FROM login_attempts WHERE (locked_until IS NULL OR locked_until < NOW()) AND updated_at < NOW() - INTERVAL 1 DAY");
     }
+}
+
+// Cookie-freie, datenschutzfreundliche Besucherkennung fuer die Statistik:
+// IP-Adresse + Browser-Kennung + heutiges Datum werden zu einem Einweg-Hash
+// verrechnet. Da das Datum mit einfliesst, aendert sich der Hash jeden Tag -
+// derselbe Mensch ist an zwei verschiedenen Tagen nicht wiedererkennbar, an
+// einem Tag aber als "ein:e eindeutige:r Besucher:in" zaehlbar. Es wird
+// weder ein Cookie noch localStorage genutzt und die IP-Adresse selbst wird
+// nirgends gespeichert.
+function friseur_visitor_hash(): string
+{
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    return hash('sha256', $ip . '|' . $ua . '|' . date('Y-m-d') . '|friseur-stats-salt');
 }
 
 // Mindestanforderungen an Passwörter (gleiches Muster wie im Kundenlogin auf braeu-ing.de):
