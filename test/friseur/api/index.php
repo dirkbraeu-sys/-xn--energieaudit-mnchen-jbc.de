@@ -57,16 +57,19 @@ switch ($action) {
         $in = friseur_body();
         $identifier = trim((string) ($in['email'] ?? $in['identifier'] ?? ''));
         $password = (string) ($in['password'] ?? '');
+        friseur_check_login_lock($pdo, $identifier);
         $stmt = $pdo->prepare('SELECT id, password_hash, verified FROM profiles WHERE identifier = ?');
         $stmt->execute([$identifier]);
         $row = $stmt->fetch();
         if (!$row || !password_verify($password, $row['password_hash'])) {
+            friseur_register_login_failure($pdo, $identifier);
             usleep(300000);
             friseur_json(['error' => 'E-Mail/Name oder Passwort ist falsch.'], 401);
         }
         if ((int) $row['verified'] !== 1) {
             friseur_json(['error' => 'Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse (Link in der Registrierungs-Mail).'], 403);
         }
+        friseur_register_login_success($pdo, $identifier);
         session_regenerate_id(true);
         $_SESSION['profile_id'] = (int) $row['id'];
         friseur_json(['profile' => friseur_current_profile($pdo)]);

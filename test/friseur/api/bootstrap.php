@@ -117,6 +117,14 @@ function friseur_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
     friseur_ensure_column($pdo, 'reviews', 'rating', "rating TINYINT UNSIGNED NOT NULL DEFAULT 5");
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            identifier VARCHAR(190) NOT NULL PRIMARY KEY,
+            fail_count INT UNSIGNED NOT NULL DEFAULT 0,
+            locked_until DATETIME NULL,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
 
     // Demo-Zugänge einmalig anlegen (entspricht den Angaben aus der README).
     $seed = [
@@ -171,6 +179,51 @@ function friseur_require_login(PDO $pdo): array
         friseur_json(['error' => 'Nicht angemeldet.'], 401);
     }
     return $p;
+}
+
+// Leichtes Login-Throttling gegen Brute-Force: nach ein paar Fehlversuchen pro
+// Konto wird die nächste Anmeldung kurz gesperrt (steigende Wartezeit). Normale
+// Kund:innen, die sich einfach nur vertippen, bemerken das praktisch nie - kein
+// Captcha, keine zusätzliche Eingabe, nur ein kurzer Timer im Hintergrund.
+function friseur_check_login_lock(PDO $pdo, string $identifier): void
+{
+    $stmt = $pdo->prepare('SELECT locked_until FROM login_attempts WHERE identifier = ?');
+    $stmt->execute([$identifier]);
+    $lockedUntil = $stmt->fetchColumn();
+    if ($lockedUntil && strtotime((string) $lockedUntil) > time()) {
+        $wait = strtotime((string) $lockedUntil) - time();
+        friseur_json(['error' => "Zu viele Fehlversuche. Bitte warten Sie {$wait} Sekunden und versuchen Sie es erneut."], 429);
+    }
+}
+
+function friseur_register_login_failure(PDO $pdo, string $identifier): void
+{
+    $stmt = $pdo->prepare('SELECT fail_count FROM login_attempts WHERE identifier = ?');
+    $stmt->execute([$identifier]);
+    $count = ((int) $stmt->fetchColumn()) + 1;
+
+    // Steigende Sperrzeiten: ab dem 3. Fehlversuch 5s, dann 15s, 60s, ab dem
+    // 6. Versuch 5 Minuten. Die ersten beiden Fehlversuche bleiben ohne Sperre.
+    $steps = [3 => 5, 4 => 15, 5 => 60, 6 => 300];
+    $lockSeconds = 0;
+    foreach ($steps as $threshold => $seconds) {
+        if ($count >= $threshold) $lockSeconds = $seconds;
+    }
+    $lockedUntil = $lockSeconds > 0 ? (new DateTimeImmutable("+{$lockSeconds} seconds"))->format('Y-m-d H:i:s') : null;
+
+    $pdo->prepare('
+        INSERT INTO login_attempts (identifier, fail_count, locked_until) VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE fail_count = VALUES(fail_count), locked_until = VALUES(locked_until)
+    ')->execute([$identifier, $count, $lockedUntil]);
+}
+
+function friseur_register_login_success(PDO $pdo, string $identifier): void
+{
+    $pdo->prepare('DELETE FROM login_attempts WHERE identifier = ?')->execute([$identifier]);
+    // Gelegentliches Aufräumen alter, längst abgelaufener Eintraege (kein Cron noetig).
+    if (random_int(1, 50) === 1) {
+        $pdo->exec("DELETE FROM login_attempts WHERE (locked_until IS NULL OR locked_until < NOW()) AND updated_at < NOW() - INTERVAL 1 DAY");
+    }
 }
 
 // Mindestanforderungen an Passwörter (gleiches Muster wie im Kundenlogin auf braeu-ing.de):
