@@ -279,12 +279,25 @@ section{padding:78px 0;}
 .review-author{font-weight:600; color:var(--gold-dark);}
 .review-stars{color:var(--gold); font-size:1.1rem; letter-spacing:1px;}
 
-.star-rating{display:flex; flex-direction:row-reverse; justify-content:flex-end; gap:2px; font-size:1.8rem; width:fit-content;}
+.star-rating{display:flex; flex-direction:row-reverse; justify-content:flex-end; gap:6px; font-size:2.6rem; width:fit-content; line-height:1;}
 .star-rating input{position:absolute; opacity:0; width:0; height:0;}
-.form-row .star-rating label{color:var(--line); cursor:pointer; transition:color .15s; display:inline; font-weight:400; margin-bottom:0;}
+.form-row .star-rating label{color:var(--line); cursor:pointer; transition:transform .1s, color .15s; display:inline; font-weight:400; margin-bottom:0;}
 .star-rating input:checked ~ label,
 .star-rating label:hover,
 .star-rating label:hover ~ label{color:var(--gold);}
+.star-rating label:hover{transform:scale(1.15);}
+
+.review-form-card{
+  max-width:600px; margin:0 auto 36px; background:#fff; border:1px solid var(--line);
+  border-radius:16px; padding:32px; box-shadow:var(--shadow);
+}
+.review-form-card h3{margin:0 0 20px; font-family:var(--serif); font-size:1.3rem; text-align:center;}
+.review-form-card .form-row{margin-bottom:20px;}
+.review-form-card .form-row:has(.star-rating){text-align:center;}
+.review-form-card .star-rating{margin:0 auto;}
+.review-form-card textarea{font-size:1rem; padding:14px;}
+.review-form-card .form-actions{justify-content:center;}
+.review-form-card .btn{padding:14px 32px; font-size:1rem;}
 
 /* ---------- Öffnungszeiten ---------- */
 .hours-table{width:100%; max-width:480px; margin:0 auto; border-collapse:collapse;}

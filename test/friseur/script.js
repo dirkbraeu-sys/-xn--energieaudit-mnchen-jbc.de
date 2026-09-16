@@ -386,7 +386,8 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 }
 function starsHTML(rating) {
-  const r = Math.max(0, Math.min(5, Math.round(rating)));
+  const parsed = Math.round(Number(rating));
+  const r = Number.isFinite(parsed) ? Math.max(0, Math.min(5, parsed)) : 5;
   return `<span class="review-stars" aria-label="${r} von 5 Sternen">${"★".repeat(r)}${"☆".repeat(5 - r)}</span>`;
 }
 function starRatingInputHTML(id) {
@@ -410,14 +411,15 @@ async function renderReviews() {
 
   root.innerHTML = `
     ${currentProfile ? `
-      <form id="review-form" style="max-width:560px; margin:0 auto 32px;">
+      <form id="review-form" class="review-form-card">
+        <h3>Wie war Ihr Besuch bei uns?</h3>
         <div class="form-row">
           <label>Ihre Bewertung</label>
           ${starRatingInputHTML("review-rating")}
         </div>
         <div class="form-row">
           <label for="review-body">Ihre Meinung</label>
-          <textarea id="review-body" rows="3" maxlength="1000" spellcheck="true" lang="de" placeholder="Wie war Ihr Besuch bei uns?" required></textarea>
+          <textarea id="review-body" rows="4" maxlength="1000" spellcheck="true" lang="de" placeholder="Erzählen Sie uns von Ihrem Besuch – was hat Ihnen besonders gefallen?" required></textarea>
         </div>
         <div id="review-error"></div>
         <div class="form-actions">
@@ -1803,6 +1805,7 @@ let adminExpandedCustomer = null;
 async function renderAdminCustomers() {
   const content = document.getElementById("admin-tab-content");
   const profiles = await dbFetchCustomerProfiles();
+  const reviews = await dbFetchReviews();
 
   const bookingsByCustomer = {};
   await Promise.all(profiles.map(async p => {
@@ -1851,12 +1854,36 @@ async function renderAdminCustomers() {
       }).join("")}
       ${profiles.length === 0 ? `<p class="hint">Noch keine Kund:innen registriert.</p>` : ""}
     </div>
+
+    <h3 style="margin-top:36px;">Kundenmeinungen (${reviews.length})</h3>
+    <div class="reviews-grid" id="admin-reviews-list">
+      ${reviews.length === 0
+        ? `<p class="hint" style="grid-column:1/-1;">Noch keine Kundenmeinungen vorhanden.</p>`
+        : reviews.map(r => `
+          <div class="review-card">
+            ${starsHTML(r.rating)}
+            <p class="review-body">„${escapeHtml(r.body)}"</p>
+            <div class="review-foot">
+              <span class="review-author">– ${escapeHtml(r.first_name)}</span>
+              <button type="button" class="link-danger" data-del-review="${r.id}">löschen</button>
+            </div>
+          </div>
+        `).join("")}
+    </div>
   `;
 
   content.querySelectorAll("[data-toggle-customer]").forEach(btn => {
     btn.addEventListener("click", () => {
       const id = btn.dataset.toggleCustomer;
       adminExpandedCustomer = adminExpandedCustomer === id ? null : id;
+      renderAdminCustomers();
+    });
+  });
+
+  content.querySelectorAll("[data-del-review]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Diese Kundenmeinung wirklich löschen?")) return;
+      await dbDeleteReview(btn.dataset.delReview);
       renderAdminCustomers();
     });
   });
