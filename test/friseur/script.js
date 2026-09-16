@@ -1191,15 +1191,24 @@ async function renderCustomerAppointmentsTab(profile) {
   const content = document.getElementById("customer-tab-content");
   const mine = await dbFetchBookingsForCustomer(profile.id);
 
+  // API liefert alle Buchungen (Vergangenheit + Zukunft), aufsteigend nach Datum.
+  // Für die Anzeige trennen wir bevorstehende Termine von der Terminhistorie -
+  // bei vergangenen Terminen ergeben "stornieren"/"Kalender" keinen Sinn mehr.
+  const todayStr = fmtDate(new Date());
+  const upcoming = mine.filter(b => b.date >= todayStr);
+  const past = mine.filter(b => b.date < todayStr).slice().reverse();
+
+  const apptLine = (b) => `${new Date(b.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" })}
+    · ${b.start}–${b.end} Uhr · ${b.service} · bei ${b.staff || "?"}`;
+
   content.innerHTML = `
-    <h3 style="margin-top:0;">${mine.length === 0 ? "Keine gebuchten Termine" : `${mine.length} gebuchte${mine.length === 1 ? "r Termin" : " Termine"}`}</h3>
+    <h3 style="margin-top:0;">${upcoming.length === 0 ? "Keine bevorstehenden Termine" : `${upcoming.length} bevorstehende${upcoming.length === 1 ? "r Termin" : " Termine"}`}</h3>
     <ul class="appt-list" id="my-appts">
-      ${mine.length === 0
-        ? `<li class="hint" style="background:none;">Sie haben aktuell keine gebuchten Termine.</li>`
-        : mine.map(b => `
+      ${upcoming.length === 0
+        ? `<li class="hint" style="background:none;">Sie haben aktuell keine bevorstehenden Termine.</li>`
+        : upcoming.map(b => `
           <li>
-            <span>${new Date(b.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" })}
-              · ${b.start}–${b.end} Uhr · ${b.service} · bei ${b.staff || "?"}</span>
+            <span>${apptLine(b)}</span>
             <span style="display:flex; gap:10px; align-items:center;">
               <button class="link-danger" data-ics="${b.id}" style="color:var(--gold-dark);">📅 Kalender</button>
               <button class="link-danger" data-cancel="${b.id}">stornieren</button>
@@ -1210,6 +1219,13 @@ async function renderCustomerAppointmentsTab(profile) {
     <div class="form-actions" style="margin-top:10px;">
       <button type="button" class="btn btn-light" id="goto-booking-btn">+ Neuen Termin buchen</button>
     </div>
+
+    <h3 style="margin-top:36px;">Terminhistorie${past.length > 0 ? ` (${past.length})` : ""}</h3>
+    <ul class="appt-list">
+      ${past.length === 0
+        ? `<li class="hint" style="background:none;">Noch keine vergangenen Termine.</li>`
+        : past.map(b => `<li><span>${apptLine(b)}</span></li>`).join("")}
+    </ul>
   `;
 
   document.getElementById("goto-booking-btn").addEventListener("click", () => {
