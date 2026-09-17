@@ -2329,6 +2329,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Besucher:innen zeigt statt der eigenen Test- und Verwaltungsklicks.
   if (!currentProfile || currentProfile.role === "customer") trackPageView();
 
+  // PWA-Grundlage: macht die Seite installierbar ("Zum Startbildschirm
+  // hinzufügen" / Play-Store-taugliche TWA-Verpackung später möglich) und
+  // cacht nur statische Dateien fürs schnellere Laden - siehe sw.js.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => { /* kein Blocker fürs eigentliche Funktionieren der Seite */ });
+  }
+
   document.getElementById("nav-toggle")?.addEventListener("click", () => {
     document.getElementById("nav-links").classList.toggle("open");
   });
